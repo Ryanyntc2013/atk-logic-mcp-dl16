@@ -43,6 +43,11 @@ PWM0->CH8, PWM1->CH14 verified 1 kHz/2 kHz.)
   `ch8:falling,ch14:high` complete; `ch0:rising` (dead channel) AND gates/timeouts.
   Edge+level coincidence not certified (fixed PWM phase; needs a controlled overlap).
 
+## Trigger timeout (DL16-TASK-015)
+
+- Tracked patch exposes `--trigger-timeout`; HIL: `ch0:rising` with `--trigger-timeout 3`
+  returns `CAPTURE_TIMEOUT` in ~3.7 s (default 30 s).
+
 ## Build patches applied to the ignored checkout (tracked, idempotent)
 
 1. libusb DLL import library (older local MSVC vs newer prebuilt static lib; C1900).
@@ -61,7 +66,6 @@ never claimed modified. Toolset defaults to installed VS2019 (`v142`) with fallb
 
 ## Open / deferred (native or wiring required)
 
-- Trigger timeout + multi-channel trigger conditions (position now exposed).
 - Persistent JSONL session; Stream capture; hardware RLE; raw wire-packet retention.
 - B4 raw packet byte cross-compare (alignment itself verified, DL16-TASK-013).
 - B5 common-source skew (requires split wiring).

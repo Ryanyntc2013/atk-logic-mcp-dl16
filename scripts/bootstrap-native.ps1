@@ -134,6 +134,26 @@ if ($ctext2.Contains('comma-separated')) {
 }
 # -----------------------------------------------------------------------------------
 
+# --- Trigger timeout (atk-logic-mcp-dl16, DL16-TASK-015) ---------------------------
+# Expose the device watchdog timeout (execute_capture default 30s) as
+# --trigger-timeout so a gated capture can fail fast. Edits only the IGNORED checkout.
+$ctext3 = ([System.IO.File]::ReadAllText($CliMain)).Replace("`r`n", "`n")
+if (-not $ctext3.Contains('--trigger-timeout')) {
+  $a1 = '        bool json_mode = false;'
+  $b1 = "        bool json_mode = false;`n        int trigger_timeout_sec = 30;"
+  $a2 = '            } else if (arg == "--out" && i + 1 < argc) {'
+  $b2 = "            } else if (arg == `"--trigger-timeout`" && i + 1 < argc) {`n                trigger_timeout_sec = std::stoi(argv[++i]);`n$a2"
+  $a3 = "            }`n        );`n        if (!json_mode) {`n            std::cout << `"\n`";"
+  $b3 = "            },`n            trigger_timeout_sec`n        );`n        if (!json_mode) {`n            std::cout << `"\n`";"
+  if ($ctext3.Contains($a1) -and $ctext3.Contains($a2) -and $ctext3.Contains($a3)) {
+    [System.IO.File]::WriteAllText($CliMain, $ctext3.Replace($a1, $b1).Replace($a2, $b2).Replace($a3, $b3))
+    Write-Host '[note] Applied local --trigger-timeout patch to ignored checkout.'
+  } else {
+    throw 'Pinned cli/main.cpp capture call not found; refusing to guess.'
+  }
+}
+# -----------------------------------------------------------------------------------
+
 if (-not $SkipBuild) {
   # Prefer the requested toolset only when it is actually installed on this machine;
   # otherwise fall back to the installed default (let CMake pick v143).

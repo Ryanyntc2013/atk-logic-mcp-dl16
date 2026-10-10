@@ -20,10 +20,11 @@ def logic_status() -> dict[str, Any]:
 def logic_capture(channels: list[int] | None = None, sample_rate_hz: int = 20_000_000,
                   duration_ms: int = 20, threshold_voltage: float = 1.6,
                   trigger: str = "immediate", timeout_s: float = 45.0,
-                  trigger_position_percent: float | None = None) -> dict[str, Any]:
+                  trigger_position_percent: float | None = None,
+                  trigger_timeout_sec: int | None = None) -> dict[str, Any]:
     return backend.capture(CaptureRequest(tuple(channels if channels is not None else [0, 1]),
                                           sample_rate_hz, duration_ms, threshold_voltage, trigger),
-                           timeout_s, trigger_position_percent)
+                           timeout_s, trigger_position_percent, trigger_timeout_sec)
 
 
 def _load(capture_id: str, channel: int, *, atkdl_file: str | None = None) -> Waveform:

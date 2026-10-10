@@ -128,3 +128,23 @@ def test_capture_rejects_bad_trigger_position(monkeypatch, tmp_path):
     r = backend.capture(CaptureRequest(), trigger_position_percent=150.0)
     assert r["success"] is False
     assert r["error_code"] == "INVALID_CAPTURE_CONFIG"
+
+
+def test_capture_passes_trigger_timeout(monkeypatch, tmp_path):
+    _cli_file(monkeypatch, tmp_path)
+    captured = {}
+
+    class R:
+        returncode = 0
+        stdout = json.dumps({"success": True, "data_integrity": "COMPLETE",
+                             "capture_complete_received": True, "trigger_ack_received": True})
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return R()
+
+    with patch("dl16_mcp.backend.subprocess.run", side_effect=fake_run):
+        backend.capture(CaptureRequest(trigger="ch0:rising"), trigger_timeout_sec=3)
+    assert "--trigger-timeout" in captured["cmd"]
+    assert "3" in captured["cmd"]
