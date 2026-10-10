@@ -8,6 +8,8 @@ Status: `NEEDS_HUMAN_HIL`; offline suite is available, no physical DL16 tested h
 
 **Requires human approval:** flash/update MCU/FPGA, send firmware/bootloader/raw commands, physically alter probes or unknown pin connections, install/replace WinUSB drivers, forcibly reset or power cycle USB devices.
 
+**Build/toolset note (DL16-TASK-003):** `scripts/bootstrap-native.ps1` defaults `-Toolset` to the locally installed VS2019 compiler (`v142`) and falls back to the machine default (`v143`) when it is not installed. Because the pinned upstream's bundled libusb static library was compiled with a newer MSVC (front-end 19.39+) and older local toolsets cannot link it (`LINK : fatal error C1900`), the script links the libusb **DLL import library** and stages `libusb-1.0.dll` next to the executables. The pinned checkout content is never modified. Use `-Toolset v143` (or `-Toolset auto`) to override.
+
 ## Work plan
 
 1. `git status --short` and `git rev-parse HEAD` => record task baseline.

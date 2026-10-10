@@ -7,6 +7,7 @@
 - Pinned upstream native source: `gjjisadog/ATK-Logic-Mcp@5fc47744c18c99f9ad0f554a965eb8cd1160c836`.
 - CMake generation, Release compilation and static libusb linkage: **PASSED**.
 - Native test executable `atkdl16_tests.exe`: **28/28 tests passed**.
+- Local Windows workstation (VS2022 + v142/v143, Python 3.12): backend rebuilt from the pinned commit via the tracked `bootstrap-native.ps1`; `v142` selected and **28/28** native tests passed. See `DL16-TASK-003`.
 - Native CLI `atk-dl16.exe`: produced and launched successfully (help/usage smoke check).
 - Windows build evidence: https://github.com/Ryanyntc2013/atk-logic-mcp-dl16/actions/runs/38035288929
 - Python CI on same tested tree: https://github.com/Ryanyntc2013/atk-logic-mcp-dl16/actions/runs/38035288927
@@ -25,6 +26,17 @@
 - [LHX DL16 CLI review](research/LHX369963-dl16-cli-cross-validation-2026-10-10.md) compares official sources, pinned native C++, LHX Linux/PyUSB and HUGEL Windows reports. **SOURCE_REVIEWED, not locally reproduced HIL**.
 - [DL16-TASK-002](tasks/DL16-TASK-002.md) provides offline contract vectors, model-specific compatibility gates and local-agent handoff.
 - Open differences: 25/500 MHz rate indices, 9B/10B trigger frames, MCU/FPGA short packets, order-3 crop, RLE/Stream/Buffer transport tails. No live backend behavior changed by this documentation revision.
+
+## Local build reproducibility (2026-10-10)
+
+- Pinned `bootstrap-native.ps1` now defaults `-Toolset` to the locally installed VS2019 toolset (`v142`) and falls back to the machine default (`v143`) with a warning when it is absent. `-Toolset auto` forces the CMake default.
+- The bundled libusb static library is compiled with a NEWER MSVC (front-end 19.39+); local toolsets older than that cannot link it (`LINK : fatal error C1900` Il mismatch, `P1=20240319` constant). The script links the libusb **DLL import library** and stages `libusb-1.0.dll` next to the executables; the pinned commit content is unchanged. Details: `docs/tasks/DL16-TASK-003.md`.
+
+## Local hardware observed (2026-10-10, this workstation, not CI)
+
+- `1a86:ffcc` enumerated; `info` reports **DL16 Plus**, 16 channels, USB 2.0, MCU v1.9, FPGA v2.22.
+- Bounded `buffer` capture (CH0, immediate trigger, 20 MHz, 20 ms, 1.6 V) returned `evidence_source=REAL_HARDWARE`, `data_integrity=COMPLETE`, `trigger_ack_received=true`, `capture_complete_received=true`, 400000 samples/channel. Raw artifact kept locally (ignored).
+- **HIL_PASS is NOT issued**: no independent-instrument comparison and no real trigger-gating test were performed; these remain `HIL_NOT_RUN`.
 
 ## NOT yet verified
 
