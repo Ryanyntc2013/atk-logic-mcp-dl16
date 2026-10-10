@@ -1,6 +1,6 @@
 # DL16-TASK-018 — persistent native JSONL session design
 
-**Status:** TASK-018-A and 018-B implemented locally; 018-C LOCAL_HIL not run.
+**Status:** TASK-018-A and 018-B implemented locally; first 018-C attempt failed on nested capture JSON framing. Fix is in progress; a new bounded HIL attempt is required.
 **Scope:** replace per-operation native CLI process startup with one owned, persistent native
 process that serializes `status` and buffer-capture requests over JSON Lines (JSONL).
 **Evidence boundary:** B6 is currently retry-contained, not fixed. This design does not claim
@@ -185,10 +185,20 @@ prove all capture modes, all firmware versions, or a general B6 fix.
   replays capture requests.
 - `DL16_BACKEND_MODE=session` opts into session routing for status/capture. Default remains
   `oneshot`; failures do not silently fall back. Process shutdown closes the owned worker.
+- First operator-approved 018-C attempt used PWM0->CH8 and PWM1->CH14. The second-worker
+  ownership probe correctly returned `DEVICE_OPEN_FAILED` indicating the port was claimed.
+  The first persistent capture then completed on-device and wrote
+  `cap_1791641573277_8694`, but the Python parent rejected the outer JSONL response because
+  the embedded multiline capture JSON had not been compacted/escaped. The block stopped
+  immediately: no capture replay and no one-shot comparison. Read-only follow-up status was
+  connected/ready. Evidence and its SHA256 manifest are in ignored
+  `artifacts/hil/DL16-TASK-018/`.
+- A fix was added to compact nested native JSON outside quoted string contents; native
+  regression coverage and Python protocol diagnostics are being rerun before any new HIL.
 - Verification on Windows: `bootstrap-native.ps1` (clean reset + ordered patches) succeeded;
   native suite 32/32; JSONL 6-request hello/malformed/unknown/invalid-capture/invalid-trigger/
   close smoke passed. Python suite 107 passed; compileall and diff checks passed.
-- Confirmed wiring for the planned HIL was updated to PWM0->CH8 and PWM1->CH14; the test no
-  longer depends on changing the wiring to CH0. The operator is currently away from the
-  hardware, so no device access occurred. Session `status`/capture HIL, child ownership
-  against a second process, and the 20-capture comparison remain in 018-C.
+- Current confirmed wiring is PWM0->CH8 and PWM1->CH14; the test does not require changing
+  wiring to CH0. The first session capture exposed a response framing defect. Session HIL
+  acceptance and the 20-capture one-shot comparison remain open until the fix is verified
+  offline and a new bounded block is explicitly run.

@@ -13,20 +13,22 @@ import queue
 import subprocess
 import threading
 import time
-from typing import Any
+from typing import Any, Callable
 
 MAX_LINE_BYTES = 64 * 1024
 STOP_GRACE_SECONDS = 1.0
 
 
 class SessionFailure(RuntimeError):
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str, *, diagnostics: dict[str, Any] | None = None):
         super().__init__(message)
         self.code = code
+        self.diagnostics = diagnostics or {}
 
 
 class NativeSession:
-    def __init__(self, executable: Path, *, popen_factory=None):
+    def __init__(self, executable: Path, *, popen_factory=None,
+                 observer: Callable[[dict[str, Any]], None] | None = None):
         self.executable = Path(executable)
         self._popen_factory = popen_factory or subprocess.Popen
         self._proc: subprocess.Popen[str] | None = None
@@ -36,6 +38,8 @@ class NativeSession:
         self._failed = False
         self._closed = False
         self._hello = False
+        self._observer = observer
+        self.last_diagnostics: dict[str, Any] = {}
 
     @property
     def pid(self) -> int | None:
@@ -124,8 +128,12 @@ class NativeSession:
         try:
             value = json.loads(payload)
         except (json.JSONDecodeError, TypeError) as exc:
+            self.last_diagnostics = {"response_preview": str(payload)[:2048],
+                                     "response_bytes": len(str(payload).encode("utf-8", errors="replace"))}
+            self._observe("protocol_error", self.last_diagnostics)
             self._invalidate()
-            raise SessionFailure("SESSION_PROTOCOL_ERROR", f"invalid JSON response: {exc}") from exc
+            raise SessionFailure("SESSION_PROTOCOL_ERROR", f"invalid JSON response: {exc}",
+                                 diagnostics=self.last_diagnostics) from exc
         if not isinstance(value, dict):
             self._invalidate()
             raise SessionFailure("SESSION_PROTOCOL_ERROR", "native response must be a JSON object")
@@ -149,12 +157,25 @@ class NativeSession:
             raise SessionFailure("SESSION_EXITED", f"failed writing to native session: {exc}") from exc
         response = self._next_response(timeout_s)
         if response.get("request_id") != request_id:
+            self.last_diagnostics = {"expected_request_id": request_id,
+                                     "actual_request_id": response.get("request_id"),
+                                     "response_keys": sorted(response.keys())}
+            self._observe("protocol_error", self.last_diagnostics)
             self._invalidate()
-            raise SessionFailure("SESSION_PROTOCOL_ERROR", "native response request_id mismatch")
+            raise SessionFailure("SESSION_PROTOCOL_ERROR", "native response request_id mismatch",
+                                 diagnostics=self.last_diagnostics)
         if response.get("ok") is not True:
             raise SessionFailure(str(response.get("error_code", "SESSION_COMMAND_FAILED")),
                                  str(response.get("message", "native command failed")))
         return response
+
+    def _observe(self, event: str, details: dict[str, Any]) -> None:
+        if self._observer is None:
+            return
+        try:
+            self._observer({"event": event, "pid": self.pid, **details})
+        except Exception:
+            pass
 
     def request(self, request: dict[str, Any], *, timeout_s: float) -> dict[str, Any]:
         with self._lock:

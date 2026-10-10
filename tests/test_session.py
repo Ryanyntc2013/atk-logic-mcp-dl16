@@ -92,6 +92,20 @@ def test_session_protocol_failure_invalidates_child(mode, expected, tmp_path):
         session.close()
 
 
+def test_malformed_response_preserves_bounded_diagnostics(tmp_path):
+    factory, _ = _factory("malformed", tmp_path / "commands.log")
+    events = []
+    session = NativeSession(Path("worker"), popen_factory=factory, observer=events.append)
+    with pytest.raises(SessionFailure) as caught:
+        session.request({"command": "status"}, timeout_s=2)
+    assert caught.value.code == "SESSION_PROTOCOL_ERROR"
+    assert caught.value.diagnostics["response_preview"].startswith("{bad")
+    assert caught.value.diagnostics["response_bytes"] <= 2048
+    assert events[0]["event"] == "protocol_error"
+    assert session.pid is None
+    session.close()
+
+
 def test_session_timeout_terminates_child_and_never_replays_capture(tmp_path):
     record = tmp_path / "commands.log"
     factory, calls = _factory("timeout", record)

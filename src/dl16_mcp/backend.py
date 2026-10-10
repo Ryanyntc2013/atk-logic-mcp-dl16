@@ -189,7 +189,8 @@ def capture(request: CaptureRequest, timeout_s: float = 45.0,
         except SessionFailure as exc:
             return {"success": False, "error_code": exc.code, "message": str(exc),
                     "data_integrity": "UNKNOWN", "evidence_source": "NONE",
-                    "backend": "native-session", "attempts": 1, "retry_log": []}
+                    "backend": "native-session", "attempts": 1, "retry_log": [],
+                    "session_diagnostics": getattr(exc, "diagnostics", None)}
     cmd = [str(cli), "capture", "--channels", ",".join(map(str, request.channels)),
            "--sample-rate", str(request.sample_rate_hz), "--duration", f"{request.duration_ms}ms",
            "--threshold", str(request.threshold_voltage), "--trigger", request.trigger,

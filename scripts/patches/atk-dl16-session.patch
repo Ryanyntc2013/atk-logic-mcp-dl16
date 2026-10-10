@@ -1,5 +1,5 @@
 diff --git a/cli/main.cpp b/cli/main.cpp
-index 4022aeb..474ee38 100644
+index 4022aeb..b6526c7 100644
 --- a/cli/main.cpp
 +++ b/cli/main.cpp
 @@ -3,11 +3,14 @@
@@ -65,7 +65,7 @@ index 4022aeb..474ee38 100644
 +        if(!opened||!dev.is_open()){
 +            auto e=dev.open();if(!e){opened=false;std::cout<<session::error_response(id,"DEVICE_OPEN_FAILED",e.message)<<std::flush;continue;}opened=true;
 +        }
-+        CaptureEngine engine(dev);auto result=engine.execute_capture(cfg,out,nullptr,timeout);std::string json=serialize_capture_result_json(result,out);if(!json.empty()&&json.back()=='\n')json.pop_back();
++        CaptureEngine engine(dev);auto result=engine.execute_capture(cfg,out,nullptr,timeout);std::string json=session::compact_json(serialize_capture_result_json(result,out));if(!json.empty()&&json.back()=='\n')json.pop_back();
 +        std::cout<<session::response(id,"\"ok\":true,\"session\":\"ready\",\"result\":"+json)<<std::flush;
 +    }
 +    if(opened)dev.close();return 0;
@@ -91,7 +91,7 @@ index 4022aeb..474ee38 100644
      if (cmd == "list") {
          auto devices = Device::enumerate();
 diff --git a/tests/unit/test_main.cpp b/tests/unit/test_main.cpp
-index d323467..f244dfb 100644
+index d323467..a6ea442 100644
 --- a/tests/unit/test_main.cpp
 +++ b/tests/unit/test_main.cpp
 @@ -6,6 +6,7 @@
@@ -102,7 +102,7 @@ index d323467..f244dfb 100644
  #include <iostream>
  #include <vector>
  #include <numeric>
-@@ -65,6 +66,27 @@ TEST_CASE(test_threshold_encoding) {
+@@ -65,6 +66,31 @@ TEST_CASE(test_threshold_encoding) {
      ASSERT_TRUE(std::abs(decode_threshold(code_neg) - (-1.5)) < 0.05);
  }
  
@@ -125,6 +125,10 @@ index d323467..f244dfb 100644
 +    auto r=session::error_response("r\"\\1","INVALID_JSON","bad\nrequest");
 +    ASSERT_TRUE(r.find("\"request_id\":\"r\\\"\\\\1\"")!=std::string::npos);
 +    ASSERT_TRUE(r.find("bad\\nrequest")!=std::string::npos);ASSERT_TRUE(r.back()=='\n');
++}
++TEST_CASE(test_session_compacts_nested_json_without_touching_string_contents) {
++    const auto compact=session::compact_json("{\n \"message\": \"keep  spaces\\n and braces {}\", \"ok\": true }\n");
++    ASSERT_EQ(compact,std::string("{\"message\":\"keep  spaces\\n and braces {}\",\"ok\":true}"));
 +}
 +
  TEST_CASE(test_sample_rate_conversion) {
