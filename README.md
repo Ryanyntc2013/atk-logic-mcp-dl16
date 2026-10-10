@@ -105,7 +105,7 @@ For Cursor, add to `.cursor/mcp.json` or the user's MCP settings, with a **full 
 | Tool | Status | Description |
 |---|---|---|
 | `logic_status` | Native adapter | Device identification, firmware, USB state |
-| `logic_capture` | Native adapter; **HIL unverified** | Bounded buffer capture and machine-readable artifacts |
+| `logic_capture` | Native adapter; gating/position HIL-verified | Bounded buffer capture; edge/level and multi-channel AND triggers gate (10-byte payload); `trigger_position_percent` sets pre-trigger |
 | `logic_inspect` | Offline tested | Preview 1..1000 edges with sample/time indices |
 | `logic_measure_skew` | Offline tested | Signed pairwise delay, P95/P99, missing/extra pulses |
 | `logic_measure_pwm` | Offline tested | Median-period frequency and period jitter |
