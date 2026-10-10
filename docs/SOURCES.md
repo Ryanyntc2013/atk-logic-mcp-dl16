@@ -6,8 +6,13 @@
 | [ALIENTEK atk_libsigrokdecode](https://github.com/alientek-openedv/atk_libsigrokdecode) | `783fec96047f5859c2122ac79123a6929a35f75f` | GPL-3.0-or-later | Protocol decoder catalog / architecture reference; not bundled |
 | [gjjisadog ATK-Logic-Mcp](https://github.com/gjjisadog/ATK-Logic-Mcp) | `5fc47744c18c99f9ad0f554a965eb8cd1160c836` | GPL-3.0-or-later | **Actual native USB backend/CLI plus UART/SPI/I2C Python decoders**, cloned at setup time |
 | [hugelzhang atk-logic-mcp](https://github.com/hugelzhang/atk-logic-mcp) | `77320addfb34d3973d09a7af663de76023034587` | MIT (project; review dependency licenses separately) | Hardware report cross-check: RLE, device self PWM, overflow artifacts, `.atkdl`, false-trigger concerns; not bundled |
+| [LHX369963 dl16-cli](https://github.com/LHX369963/dl16-cli) | `8d7c209c1e3b13923620bb34cec915291a749612` | **No explicit LICENSE found** in public tree; do not copy code | Independently implemented Linux PyUSB / author-reported DL16 HIL: sampling indices, 9B/10B triggers, MCU/FPGA handshake, RLE/Stream, 512B short responses; **research only, not bundled** |
 
 The content of these upstream repositories is **NOT copied** into this project's tracked source tree. `scripts/bootstrap-native.ps1` clones a pinned snapshot locally; this is an important distinction from claiming the entire C++ source has been independently rewritten or fully HIL-tested. `scripts/bootstrap-references.ps1` optionally fetches the remaining repos for auditors.
+
+## Independent LHX cross-validation (2026-10-10)
+
+See [LHX cross-validation research](research/LHX369963-dl16-cli-cross-validation-2026-10-10.md) and the [DL16-TASK-002 implementation/hardware handoff](tasks/DL16-TASK-002.md). Source code agreement is **not** HIL. Open high-risk differences: 25MHz rate index 7 versus no-data, DL16 500MHz index 0 versus current CPP index 13 / Plus-only constraints, 9B versus 10B simple trigger, 512B short handshake behavior, pre-trigger order-3 and mode-dependent trailer sizes. Published author HIL is not locally reproduced. Keep `gjjisadog` pinned as current runtime; do not adopt the third-party PyUSB implementation without licensing, explicit design review and tested patches.
 
 ## Verified by source review (not by our physical device)
 
