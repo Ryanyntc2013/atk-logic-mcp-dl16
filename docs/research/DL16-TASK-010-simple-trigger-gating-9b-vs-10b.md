@@ -43,14 +43,19 @@ Completion is the order-6 Complete message within the read window; an order-4 AC
 - An order-4 ACK + non-zero order-3 offset from a 9B capture are therefore **not**
   trigger evidence.
 
-## Impact / next
+## Impact / fix (DL16-TASK-011)
 
-- The pinned CPP `build_simple_trigger_frame` uses the 9-byte layout, so the current
-  MCP `logic_capture` does **not** gate. Fixing it requires a **reviewed patch or
-  pinned fork** (change the non-immediate trigger payload to the 10-byte form) plus
-  regression tests and local HIL — not a silent switch. Immediate-trigger semantics
-  (9B `instant flag`) must be preserved and re-verified.
-- No live encoding was changed by this task.
+- The pinned CPP `build_simple_trigger_frame` used the 9-byte layout, so MCP
+  `logic_capture` did **not** gate. `bootstrap-native.ps1` now applies a **tracked
+  patch** to the ignored checkout: non-immediate triggers use the 10-byte gating
+  payload, immediate keeps the 9-byte instant flag. The offline reference, golden
+  vectors and native cross-check harness were updated to match.
+- **HIL after the fix (this unit):**
+  - CH0 (no edge) + `ch0:rising` -> `CAPTURE_TIMEOUT` (gated, waits) — via MCP CLI.
+  - CH8 (PWM0 edges) + `ch8:rising` -> success.
+  - CH0 + `immediate` -> success (regression OK).
+- The pinned commit content is never modified on disk permanently; the patch is
+  applied at build time and is idempotent.
 
 ## Reproduce
 

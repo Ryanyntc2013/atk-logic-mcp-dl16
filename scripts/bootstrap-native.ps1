@@ -41,6 +41,23 @@ if ($text.Contains($StaticLibRef)) {
 }
 # -----------------------------------------------------------------------------------
 
+# --- SimpleTrigger gating fix (atk-logic-mcp-dl16, DL16-TASK-010/011) --------------
+# HIL on DL16 Plus shows the pinned 9-byte SimpleTrigger payload never gates while the
+# 10-byte payload does. Non-immediate triggers use 8 pair bytes + 2 zero collect-type
+# bytes; immediate keeps the 9-byte instant flag. Edits only the IGNORED checkout; the
+# pinned commit content is never claimed to be modified.
+$ProtoCpp = Join-Path $Dst 'core\src\protocol.cpp'
+$OldTrig = 'payload.push_back(config.trigger.is_instantly ? 1 : 0);'
+$ptext = [System.IO.File]::ReadAllText($ProtoCpp)
+if ($ptext.Contains($OldTrig)) {
+  $newTrig = "if (config.trigger.is_instantly) {`r`n        payload.push_back(1);`r`n    } else {`r`n        payload.push_back(0);`r`n        payload.push_back(0);`r`n    }"
+  [System.IO.File]::WriteAllText($ProtoCpp, $ptext.Replace($OldTrig, $newTrig))
+  Write-Host '[note] Applied local 10-byte gated SimpleTrigger fix to ignored checkout.'
+} elseif (-not $ptext.Contains('config.trigger.is_instantly')) {
+  throw 'Pinned protocol.cpp trigger builder not found; refusing to guess.'
+}
+# -----------------------------------------------------------------------------------
+
 if (-not $SkipBuild) {
   # Prefer the requested toolset only when it is actually installed on this machine;
   # otherwise fall back to the installed default (let CMake pick v143).

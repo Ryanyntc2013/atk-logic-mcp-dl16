@@ -125,10 +125,11 @@ def test_trigger_nibble_encoding():
     assert ref.trigger_payload_cpp([0, 1], {0: "rising", 1: "falling"})[0] == 0x9A
 
 
-def test_trigger_payload_is_9_bytes_cpp():
-    payload = ref.trigger_payload_cpp([0], {0: "rising"})
-    assert len(payload) == 9
-    assert payload[8] == 0  # not immediate
+def test_trigger_payload_length_by_variant():
+    gated = ref.trigger_payload_cpp([0], {0: "rising"}, is_instantly=False)
+    assert len(gated) == 10 and gated[8] == 0 and gated[9] == 0  # gating payload
+    immediate = ref.trigger_payload_cpp([0], {0: "rising"}, is_instantly=True)
+    assert len(immediate) == 9 and immediate[8] == 1  # instant flag
 
 
 def test_trigger_payload_9b_vs_10b_divergence():

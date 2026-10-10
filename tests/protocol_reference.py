@@ -223,7 +223,12 @@ _TRIGGER_BITS = {
 
 
 def trigger_payload_cpp(enabled, triggers=None, is_instantly: bool = False) -> bytes:
-    """CPP/VENDOR 9-byte simple-trigger payload: 8 pair bytes + 1 instant flag."""
+    """Simple-trigger payload.
+
+    Immediate uses the 9-byte form (8 pair bytes + instant flag). Non-immediate
+    triggers use the 10-byte gating form (8 pair bytes + 2 zero collect-type bytes);
+    HIL (DL16-TASK-010) shows the 9-byte form does not gate and the 10-byte form does.
+    """
     enabled = set(enabled)
     triggers = triggers or {}
     out = bytearray()
@@ -236,7 +241,11 @@ def trigger_payload_cpp(enabled, triggers=None, is_instantly: bool = False) -> b
             b |= 0x08
             b |= _TRIGGER_BITS[triggers.get(i + 1)][1]
         out.append(b)
-    out.append(1 if is_instantly else 0)
+    if is_instantly:
+        out.append(1)
+    else:
+        out.append(0)
+        out.append(0)
     return bytes(out)
 
 

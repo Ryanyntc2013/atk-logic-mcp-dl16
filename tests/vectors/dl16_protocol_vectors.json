@@ -6,8 +6,8 @@
   "vectors": {
     "crc_123456789": "d202d277",
     "crc_empty": "ffffffff",
-    "trigger_cpp_ch0_rising": "900000000000000000",
-    "trigger_cpp_ch0_ch1": "9a0000000000000000",
+    "trigger_cpp_ch0_rising": "90000000000000000000",
+    "trigger_cpp_ch0_ch1": "9a000000000000000000",
     "trigger_cpp_all_immediate": "ffffffffffffffff01",
     "trigger_lhx_all_immediate": "ffffffffffffffff0000",
     "parameter_buffer_20m_400k_t36k": "801006801a060000a08c000000",
