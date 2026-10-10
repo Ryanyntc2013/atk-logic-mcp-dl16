@@ -20,6 +20,12 @@
 - Chunked edge extraction, PWM frequency/period, dual-channel skew, missed-pulse analysis and waveform-level verdicts.
 - Windows bootstrap scripts; explicit human/HIL gates and coding-agent handoff.
 
+## Independent protocol research added (2026-10-10)
+
+- [LHX DL16 CLI review](research/LHX369963-dl16-cli-cross-validation-2026-10-10.md) compares official sources, pinned native C++, LHX Linux/PyUSB and HUGEL Windows reports. **SOURCE_REVIEWED, not locally reproduced HIL**.
+- [DL16-TASK-002](tasks/DL16-TASK-002.md) provides offline contract vectors, model-specific compatibility gates and local-agent handoff.
+- Open differences: 25/500 MHz rate indices, 9B/10B trigger frames, MCU/FPGA short packets, order-3 crop, RLE/Stream/Buffer transport tails. No live backend behavior changed by this documentation revision.
+
 ## NOT yet verified
 
 - No DL16 is attached to GitHub-hosted runner: **USB enumeration, real capture, trigger behavior and hardware data integrity are not validated**.
