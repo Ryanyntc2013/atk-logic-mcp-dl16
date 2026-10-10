@@ -53,9 +53,13 @@ class CaptureRequest:
         if self.mode != "buffer":
             raise ValueError("Only buffer mode is enabled for trusted captures; stream is not HIL-validated")
         if self.trigger != "immediate":
-            match = re.fullmatch(r"ch(1[0-5]|[0-9]):(rising|falling|high|low|both|double)", self.trigger)
-            if not match or int(match.group(1)) not in self.channels:
-                raise ValueError("Trigger must be 'immediate' or chN:rising/falling/high/low/both for an enabled channel")
+            tokens = [token.strip() for token in self.trigger.split(",") if token.strip()]
+            if not tokens:
+                raise ValueError("Trigger must be 'immediate' or chN:edge[,chM:edge...]")
+            for token in tokens:
+                match = re.fullmatch(r"ch(1[0-5]|[0-9]):(rising|falling|high|low|both|double)", token)
+                if not match or int(match.group(1)) not in self.channels:
+                    raise ValueError("Each trigger must be chN:rising/falling/high/low/both for an enabled channel")
         # Conservative generic device-agnostic bound; model-specific limits remain native backend's job.
         if self.sample_rate_hz * self.duration_ms // 1000 > 1_000_000_000:
             raise ValueError("Requested capture exceeds scaffold safety cap (1G samples/channel)")

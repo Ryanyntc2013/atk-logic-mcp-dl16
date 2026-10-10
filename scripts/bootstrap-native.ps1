@@ -75,6 +75,65 @@ if ($ctext.Contains('--trigger-position')) {
 }
 # -----------------------------------------------------------------------------------
 
+# --- Multi-channel trigger conditions (atk-logic-mcp-dl16, DL16-TASK-014) -----------
+# The pinned CLI accepted a single chN:edge trigger. Accept a comma-separated list,
+# e.g. "ch8:rising,ch14:high" (all conditions AND'ed). Edits only the IGNORED checkout.
+$TrigOld = @'
+    // Format: ch0:rising or 0:rising or ch1:falling
+    std::string s = str;
+    if (s.rfind("ch", 0) == 0) s = s.substr(2);
+    auto colon = s.find(':');
+    if (colon != std::string::npos) {
+        uint8_t ch = static_cast<uint8_t>(std::stoi(s.substr(0, colon)));
+        std::string edge = s.substr(colon + 1);
+        TriggerType type = TriggerType::RisingEdge;
+        if (edge == "falling") type = TriggerType::FallingEdge;
+        else if (edge == "high") type = TriggerType::HighLevel;
+        else if (edge == "low") type = TriggerType::LowLevel;
+        else if (edge == "both" || edge == "double") type = TriggerType::DoubleEdge;
+        else if (edge == "rising") type = TriggerType::RisingEdge;
+
+        cfg.triggers.push_back({ch, type});
+        cfg.is_instantly = false;
+    } else {
+        cfg.is_instantly = true;
+    }
+'@
+$TrigNew = @'
+    // Format: ch0:rising,ch8:high (comma-separated; conditions AND'ed)
+    size_t tstart = 0;
+    while (tstart < str.size()) {
+        size_t comma = str.find(',', tstart);
+        std::string s = str.substr(tstart, comma == std::string::npos ? std::string::npos : comma - tstart);
+        tstart = (comma == std::string::npos) ? str.size() : comma + 1;
+        if (s.rfind("ch", 0) == 0) s = s.substr(2);
+        auto colon = s.find(':');
+        if (colon == std::string::npos) continue;
+        uint8_t ch = static_cast<uint8_t>(std::stoi(s.substr(0, colon)));
+        std::string edge = s.substr(colon + 1);
+        TriggerType type = TriggerType::RisingEdge;
+        if (edge == "falling") type = TriggerType::FallingEdge;
+        else if (edge == "high") type = TriggerType::HighLevel;
+        else if (edge == "low") type = TriggerType::LowLevel;
+        else if (edge == "both" || edge == "double") type = TriggerType::DoubleEdge;
+        else if (edge == "rising") type = TriggerType::RisingEdge;
+        cfg.triggers.push_back({ch, type});
+        cfg.is_instantly = false;
+    }
+'@
+$TrigOld = $TrigOld.Replace("`r`n", "`n")
+$TrigNew = $TrigNew.Replace("`r`n", "`n")
+$ctext2 = ([System.IO.File]::ReadAllText($CliMain)).Replace("`r`n", "`n")
+if ($ctext2.Contains('comma-separated')) {
+  Write-Host '[note] Multi-channel trigger patch already present in ignored checkout.'
+} elseif ($ctext2.Contains($TrigOld)) {
+  [System.IO.File]::WriteAllText($CliMain, $ctext2.Replace($TrigOld, $TrigNew))
+  Write-Host '[note] Applied local multi-channel trigger patch to ignored checkout.'
+} else {
+  throw 'Pinned cli/main.cpp parse_trigger not found; refusing to guess.'
+}
+# -----------------------------------------------------------------------------------
+
 if (-not $SkipBuild) {
   # Prefer the requested toolset only when it is actually installed on this machine;
   # otherwise fall back to the installed default (let CMake pick v143).

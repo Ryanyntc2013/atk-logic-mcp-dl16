@@ -23,7 +23,6 @@ matched. Command `0x17`, 200 MHz counter, half-up. Tool `dl16-pwm`. (Current wir
 PWM0->CH8, PWM1->CH14 verified 1 kHz/2 kHz.)
 
 ## Trigger gating fix (DL16-TASK-010/011)
-
 - 9-byte SimpleTrigger **does not gate**; 10-byte **does** (edge and level).
 - `bootstrap-native.ps1` now applies a tracked patch: non-immediate triggers use the
   10-byte payload; immediate keeps the 9-byte instant flag.
@@ -35,7 +34,14 @@ PWM0->CH8, PWM1->CH14 verified 1 kHz/2 kHz.)
 - Tracked patch adds `--trigger-position`; exposed via `logic_capture` /
   `dl16ctl capture --trigger-position`. HIL confirms it reaches the device (order-3
   offset tracks `total - trigger_depth`: pos 10 -> 360007, pos 50 -> 200008 on a
-  400000-sample buffer). Returned-buffer pre-trigger **alignment** is still open (B4).
+  400000-sample buffer). Returned-buffer pre-trigger **alignment** verified (B4,
+  DL16-TASK-013): trigger edge at `total × position%`.
+
+## Multi-channel trigger (DL16-TASK-014)
+
+- Tracked patch accepts `chN:kind[,chM:kind...]` (AND). HIL: `ch8:high,ch14:high` and
+  `ch8:falling,ch14:high` complete; `ch0:rising` (dead channel) AND gates/timeouts.
+  Edge+level coincidence not certified (fixed PWM phase; needs a controlled overlap).
 
 ## Build patches applied to the ignored checkout (tracked, idempotent)
 
