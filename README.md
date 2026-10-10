@@ -94,7 +94,7 @@ One-shot remains the default. Persistent capture (`DL16_BACKEND_MODE=session`) i
 
 The optional `DL16_SESSION_JOURNAL_DIR` setting enables local, durable request/response evidence for session mode. Use an absolute path in an ignored task evidence directory. Journal files may contain local paths, native responses and signal metadata: retain originals locally and share only separately redacted summaries. Logging is not raw USB capture, calibration, or proof of physical signal provenance.
 
-See [TASK-020 acceptance and hardware gate](docs/tasks/DL16-TASK-020-session-evidence-journal.md). Setting logging options does not authorize hardware access; current device connection, safe wiring and voltage must be confirmed before live commands.
+See [TASK-020 acceptance and hardware gate](docs/tasks/DL16-TASK-020-session-evidence-journal.md) and [TASK-021 bounded corrected-channel smoke](docs/tasks/DL16-TASK-021-corrected-session-smoke.md). Setting logging options does not authorize hardware access; current device connection, safe wiring and voltage must be confirmed before live commands.
 
 ### Local capture example (ONLY with known safe wiring)
 

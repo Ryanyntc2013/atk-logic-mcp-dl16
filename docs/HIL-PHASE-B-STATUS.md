@@ -100,6 +100,14 @@ remains observed, its physical cause unresolved, and session remains unaccepted.
   for captures until the zero-sample Complete path is reproduced and fixed offline, then
   separately revalidated in a newly approved HIL block.
 
+## DL16-TASK-021 — corrected-channel session smoke (FAILED)
+
+After renewed operator connection/wiring/safety confirmation, a single persistent native PID processed two CH8/CH14 requests at 20 MHz, 10 ms, 1.6 V, immediate trigger. First capture: metadata exactly `[8,14]`, COMPLETE, ACK/Complete and 200,000 samples/channel. Second capture: Complete present but 0/200,000 on both requested channels, `INCOMPLETE_CAPTURE`. The block stopped without replay, fallback or third capture; session closed. PWM was not configured and waveform quality was not evaluated.
+
+A separate postflight `info` failed with `Invalid MCU version header` and a 512-byte zero preview; readiness is not confirmed after the block. No reset or recovery change was attempted. This does not establish firmware damage or identify the zero-sample cause.
+
+Evidence now includes full durable request/response JSONL and per-step records under ignored `artifacts/hil/DL16-TASK-021/`, not raw USB RX. See [TASK-021 report](tasks/DL16-TASK-021-corrected-session-smoke.md). Keep one-shot default and B6 retry; next gate is bounded native receive diagnostics, not a repeatability block.
+
 ## Build patches applied to the ignored checkout (reproducible)
 
 All local native changes are one patch: scripts/patches/atk-dl16-local-build.patch, applied
