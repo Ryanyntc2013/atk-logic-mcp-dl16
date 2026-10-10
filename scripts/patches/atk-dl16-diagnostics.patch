@@ -1,0 +1,106 @@
+diff --git a/core/include/atkdl16/types.h b/core/include/atkdl16/types.h
+index d9fa79a..8de0883 100644
+--- a/core/include/atkdl16/types.h
++++ b/core/include/atkdl16/types.h
+@@ -167,2 +167,23 @@ struct ChannelEdges {
+ 
++// Bounded observations only; counters never control capture behavior.
++struct CaptureDiagnostics {
++    bool enabled{false};
++    uint64_t reads{0}, bytes{0}, short_reads{0}, unaligned_bytes{0}, messages{0};
++    std::map<unsigned, uint64_t> orders;
++    std::vector<unsigned> first_orders;
++    std::map<uint8_t, uint64_t> before_crop, after_crop, offsets;
++    void observe_read(size_t n) {
++        if (!enabled) return;
++        ++reads; bytes += n;
++        if (n && n < 2048) ++short_reads;
++        unaligned_bytes += n % 2048;
++    }
++    void observe_order(unsigned n) {
++        if (!enabled) return;
++        ++messages;
++        if (n <= 6) ++orders[n];
++        if (first_orders.size() < 32) first_orders.push_back(n);
++    }
++};
++
+ // Capture Summary Result
+@@ -175,2 +196,3 @@ struct CaptureResult {
+     CaptureConfig config;
++    CaptureDiagnostics diagnostics;
+ 
+diff --git a/core/src/capture.cpp b/core/src/capture.cpp
+index 3785c2e..42f6880 100644
+--- a/core/src/capture.cpp
++++ b/core/src/capture.cpp
+@@ -8,2 +8,3 @@
+ #include <random>
++#include <cstdlib>
+ 
+@@ -45,2 +46,4 @@ CaptureResult CaptureEngine::execute_capture(const CaptureConfig& config,
+     result.config = config;
++    const char* diag = std::getenv("DL16_NATIVE_DIAGNOSTICS");
++    result.diagnostics.enabled = diag && std::string(diag) == "1";
+     result.success = false;
+@@ -120,2 +123,3 @@ CaptureResult CaptureEngine::execute_capture(const CaptureConfig& config,
+         err = m_device.transport().read_bulk(EP_BULK_IN, raw_buf.data(), raw_buf.size(), actual_len, 200);
++        result.diagnostics.observe_read(actual_len);
+         if (!err && err.code == ErrorCode::DeviceDisconnected) {
+@@ -140,2 +144,3 @@ CaptureResult CaptureEngine::execute_capture(const CaptureConfig& config,
+                 const auto& msg = *msg_opt;
++                result.diagnostics.observe_order(static_cast<unsigned>(msg.type));
+ 
+@@ -248,2 +253,8 @@ CaptureResult CaptureEngine::execute_capture(const CaptureConfig& config,
+ 
++    if (result.diagnostics.enabled) {
++        for (uint8_t ch : config.enabled_channels) {
++            result.diagnostics.before_crop[ch] = store.sample_count(ch);
++            result.diagnostics.offsets[ch] = channel_start_offsets[ch];
++        }
++    }
+     // 7. Post-processing: Crop and Align Samples
+@@ -255,2 +266,6 @@ CaptureResult CaptureEngine::execute_capture(const CaptureConfig& config,
+     store.finalize_samples(target_samples);
++    if (result.diagnostics.enabled) {
++        for (uint8_t ch : config.enabled_channels)
++            result.diagnostics.after_crop[ch] = store.sample_count(ch);
++    }
+ 
+diff --git a/core/src/json_util.cpp b/core/src/json_util.cpp
+index b802d5e..ece2bb5 100644
+--- a/core/src/json_util.cpp
++++ b/core/src/json_util.cpp
+@@ -34,2 +34,22 @@ std::string json_escape(const std::string& input) {
+ 
++static std::string diagnostic_json(const CaptureDiagnostics& d) {
++    std::ostringstream s;
++    s << "{\"schema\":\"dl16-rx-diagnostics/v1\",\"enabled\":" << (d.enabled ? "true" : "false");
++    if (d.enabled) {
++        s << ",\"usb_reads\":" << d.reads << ",\"usb_bytes\":" << d.bytes
++          << ",\"short_reads\":" << d.short_reads << ",\"unaligned_bytes\":" << d.unaligned_bytes
++          << ",\"messages\":" << d.messages << ",\"first_orders\":[";
++        for (size_t i=0;i<d.first_orders.size();++i) { if(i)s<<","; s<<d.first_orders[i]; }
++        s << "]";
++        auto counts = [&](const char* name, const auto& values) {
++            s << ",\"" << name << "\":{"; bool first=true;
++            for(const auto& item:values) { if(!first)s<<","; first=false; s<<"\""<<unsigned(item.first)<<"\":"<<item.second; }
++            s << "}";
++        };
++        counts("order_counts",d.orders); counts("samples_before_crop",d.before_crop);
++        counts("samples_after_crop",d.after_crop); counts("crop_offsets",d.offsets);
++    }
++    s << "}"; return s.str();
++}
++
+ std::string serialize_capture_result_json(const CaptureResult& result, const std::string& out_dir) {
+@@ -51,3 +71,3 @@ std::string serialize_capture_result_json(const CaptureResult& result, const std
+         }
+-        ss << "]\n}\n";
++        ss << "],\n  \"diagnostics\": " << diagnostic_json(result.diagnostics) << "\n}\n";
+         return ss.str();
+@@ -84,3 +104,3 @@ std::string serialize_capture_result_json(const CaptureResult& result, const std
+     }
+-    ss << "]\n}\n";
++    ss << "],\n  \"diagnostics\": " << diagnostic_json(result.diagnostics) << "\n}\n";
+     return ss.str();

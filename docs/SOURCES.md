@@ -34,6 +34,10 @@ See [LHX cross-validation research](research/LHX369963-dl16-cli-cross-validation
 
 The optional session journal is independently implemented host-side JSONL logging, not a USB protocol implementation or translation of LHX source. It records caller declarations and native responses with their distinct authority; binary/file SHA-256 establishes byte identity, not physical authenticity or hardware acceptance. It does not retain raw USB traffic or retrospectively strengthen TASK-018 console-transcribed evidence. See [TASK-020](tasks/DL16-TASK-020-session-evidence-journal.md).
 
+## Bounded native observations (DL16-TASK-022)
+
+The diagnostics patch independently instruments the pinned CPP capture path and serializer without changing receive termination, USB recovery or crop behavior. Candidate stale-Complete, crop-clearing and short-response explanations remain hypotheses; neither TASK-021 timing nor the 512-byte zero MCU reply proves them. LHX lifecycle observations remain source evidence only and no LHX code was copied or translated. See [TASK-022](tasks/DL16-TASK-022-bounded-native-rx-diagnostics.md).
+
 ## License hygiene
 
 - Keep provenance, git commit IDs and third-party NOTICE when embedding source in the future.

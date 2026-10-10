@@ -63,6 +63,11 @@ jobs:
       - name: Build offline C++/Python protocol cross-check harness
         shell: pwsh
         run: .\scripts\build-vector-harness.ps1 -Toolset auto
+      - name: Run USB-free diagnostics aggregation and JSON seam
+        shell: pwsh
+        run: |
+          & 'tests/native/build/Release/dl16-diagnostics-test.exe'
+          if ($LASTEXITCODE -ne 0) { throw 'Diagnostics seam failed' }
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
