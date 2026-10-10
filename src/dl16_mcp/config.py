@@ -30,6 +30,24 @@ def exports_dir() -> Path:
     return path
 
 
+# Operator policy (docs/HIL-OPERATING-RULES.md): wide captures are refused by default because
+# 16-channel acquisition previously wedged the device. Raise only by explicit operator choice.
+DEFAULT_MAX_CHANNELS = 4
+
+
+def max_channels() -> int:
+    raw = os.environ.get("DL16_MAX_CHANNELS", "").strip()
+    if not raw:
+        return DEFAULT_MAX_CHANNELS
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError("DL16_MAX_CHANNELS must be an integer from 1 to 16") from exc
+    if not 1 <= value <= 16:
+        raise ValueError("DL16_MAX_CHANNELS must be an integer from 1 to 16")
+    return value
+
+
 @dataclass(frozen=True)
 class CaptureRequest:
     channels: tuple[int, ...] = (0, 1)
@@ -40,8 +58,8 @@ class CaptureRequest:
     mode: str = "buffer"
 
     def validate(self) -> None:
-        if not self.channels or len(self.channels) > 16:
-            raise ValueError("Expected 1 to 16 channels")
+        if not self.channels or len(self.channels) > max_channels():
+            raise ValueError(f"Expected 1 to {max_channels()} channels (set DL16_MAX_CHANNELS to raise; see docs/HIL-OPERATING-RULES.md)")
         if len(set(self.channels)) != len(self.channels) or any(not isinstance(x, int) or x < 0 or x > 15 for x in self.channels):
             raise ValueError("Channels must be distinct integers from 0 to 15")
         if self.sample_rate_hz not in {int(mhz * 1_000_000) for mhz in SUPPORTED_RATES_HZ}:
