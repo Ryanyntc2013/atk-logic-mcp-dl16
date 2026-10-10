@@ -30,6 +30,13 @@ PWM0->CH8, PWM1->CH14 verified 1 kHz/2 kHz.)
 - HIL after the patch (via MCP CLI): CH0 no-edge `ch0:rising` -> `CAPTURE_TIMEOUT`
   (gated); CH8 `ch8:rising` -> success; CH0 `immediate` -> success.
 
+## Trigger position (DL16-TASK-012)
+
+- Tracked patch adds `--trigger-position`; exposed via `logic_capture` /
+  `dl16ctl capture --trigger-position`. HIL confirms it reaches the device (order-3
+  offset tracks `total - trigger_depth`: pos 10 -> 360007, pos 50 -> 200008 on a
+  400000-sample buffer). Returned-buffer pre-trigger **alignment** is still open (B4).
+
 ## Build patches applied to the ignored checkout (tracked, idempotent)
 
 1. libusb DLL import library (older local MSVC vs newer prebuilt static lib; C1900).
@@ -48,7 +55,8 @@ never claimed modified. Toolset defaults to installed VS2019 (`v142`) with fallb
 
 ## Open / deferred (native or wiring required)
 
-- Trigger position/timeout/multi-channel conditions (position hardcoded 10%).
+- Trigger timeout + multi-channel trigger conditions (position now exposed).
 - Persistent JSONL session; Stream capture; hardware RLE; raw wire-packet retention.
-- B4 live raw order-3/tail cross-compare; B5 common-source skew (split wiring).
+- B4 live raw order-3/tail cross-compare and returned-buffer pre-trigger alignment.
+- B5 common-source skew (requires split wiring).
 - sigrok external decoder handoff (optional; VCD export already enables it).
