@@ -1,7 +1,7 @@
 # DL16-TASK-004 — PWM output configuration
 
 **Owner:** local Codex/Cursor agent on Windows.
-**State at issue:** OFFLINE_CODEC DONE / LIVE_NOT_RUN.
+**State at issue:** DONE (offline codec) / **LOCAL_HIL** (PWM0->CH0 100 Hz..20 MHz; PWM1->CH6 1 kHz).
 **Depends on:** DL16-TASK-002 (protocol vectors) and DL16-TASK-001 (device baseline).
 **Research:** [`docs/research/DL16-TASK-002-pwm-output.md`](../research/DL16-TASK-002-pwm-output.md).
 

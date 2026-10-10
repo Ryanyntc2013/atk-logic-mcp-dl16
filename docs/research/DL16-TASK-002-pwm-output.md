@@ -1,7 +1,8 @@
 # DL16 PWM output configuration (research + offline codec)
 
 **Date:** 2026-10-10
-**Status:** OFFLINE_CODEC (implemented) / LIVE_NOT_RUN (no PWM sent to hardware yet).
+**Status:** OFFLINE_CODEC (implemented) + **LOCAL_HIL** (PWM0->CH0 and PWM1->CH6
+verified on this device; see below).
 **Task:** DL16-TASK-004 (extends DL16-TASK-002 protocol work).
 **Provenance:** LHX369963/dl16-cli@8d7c209 `docs/protocol/pwm.md` (behavior + author
 live tests = REPORTED_HIL, not our device), the original ATK-Logic app transaction,
@@ -55,19 +56,28 @@ Vectors/tests: `tests/test_protocol_vectors.py` (payload bytes, ch0/ch1, stop,
 frame wrapping under cmd `0x17`, half-up rounding, invalid-input rejection) and
 the golden artifact `tests/vectors/dl16_protocol_vectors.json`.
 
-## Gated live plan (NOT executed)
+## Live results (LOCAL_HIL, 2026-10-10)
 
-PWM output drives physical pins; `AGENTS.md` requires operator-approved wiring.
+Executed with the bounded `tests/native/pwm_tool.cpp` (`dl16-pwm`), wired PWM0->CH0
+and PWM1->CH6, threshold 1.6 V. Full evidence (ignored):
+`artifacts/hil/DL16-TASK-004/FINDINGS.md` + `freq-matrix.json`.
 
-1. Replug the DL16 (it is currently wedged after the 16-channel attempt; live
-   captures time out until physical replug).
-2. Operator confirms the loopback wiring per output (PWM0 -> CH0, PWM1 -> CH6) and
-   the output logic level.
-3. Send PWM start for a known frequency/duty, capture the loopback channel, and
-   confirm the measured period equals `period_count` counter ticks at the selected
-   sample rate (e.g. 1 kHz at 20 MHz -> 20000 samples/period).
-4. Send PWM stop; confirm the channel returns to idle.
-5. Record evidence under `artifacts/hil/DL16-TASK-004/` (ignored) and label the
-   result `LOCAL_HIL`; a successful software frame build is not a hardware result.
+- **PWM0->CH0** swept 100 Hz, 1 kHz, 10 kHz, 100 kHz, 1 MHz (20 MHz capture) and
+  10 MHz, 20 MHz (100 MHz capture). Measured samples/period equalled
+  `period_count * sample_rate / 200_000_000` exactly in every case; median
+  frequency matched the request; duty 50/25/10 % matched at >= ~20 samples/period.
+- **PWM1->CH6** at 1 kHz/50 %: 1000.0 Hz, 20 000 samples/period, jitter RMS 0.
+- Live `start` payloads matched the golden vectors (`11400d0300a0860100` for ch0,
+  `21400d0300a0860100` for ch1; stop `10`/`20`).
+- `stop` returned the channel to idle (CH0 measured 0 ones).
 
-Until then, PWM remains `LIVE_NOT_RUN` / `HIL_NOT_RUN`.
+**Reproduced research R3:** `Device::open()` intermittently returns
+`Failed to parse FPGA device info packet`; an immediate retry succeeds. A
+16-channel capture that hit it left the device needing a physical replug.
+
+## Residual / not covered
+
+- No independent instrument; frequency/duty are device-internal loopback.
+- PWM1 swept only at 1 kHz (not the full matrix).
+- Absolute pin voltage / drive level not measured.
+

@@ -25,3 +25,15 @@ target_link_libraries(dl16-vector-dump PRIVATE
     "${UP}/third_party/libusb/VS2022/MS64/dll/libusb-1.0.lib"
     Advapi32
 )
+
+# Bounded PWM output sender (DL16-TASK-004); drives approved loopback wiring only.
+add_executable(dl16-pwm pwm_tool.cpp)
+target_include_directories(dl16-pwm PRIVATE
+    "${UP}/core/include"
+    "${UP}/third_party/libusb/include"
+)
+target_link_libraries(dl16-pwm PRIVATE
+    "${UP}/build/Release/atkdl16_core.lib"
+    "${UP}/third_party/libusb/VS2022/MS64/dll/libusb-1.0.lib"
+    Advapi32
+)

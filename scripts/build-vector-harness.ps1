@@ -39,5 +39,5 @@ if ($LASTEXITCODE -ne 0) { throw 'Harness build failed' }
 
 $Dll = Join-Path $RepoRoot 'external\ATK-Logic-Mcp\third_party\libusb\VS2022\MS64\dll\libusb-1.0.dll'
 if (Test-Path $Dll) { Copy-Item -LiteralPath $Dll -Destination (Join-Path $Build 'Release') -Force }
-Write-Host "[OK] Harness at $(Join-Path $Build 'Release\dl16-vector-dump.exe')"
-Write-Host 'Run pytest; tests/test_protocol_vectors.py will pick it up automatically.'
+Write-Host "[OK] Tools at $(Join-Path $Build 'Release'): dl16-vector-dump.exe (offline cross-check), dl16-pwm.exe (bounded PWM sender)"
+Write-Host 'Run pytest; tests/test_protocol_vectors.py will pick up the vector harness automatically.'
