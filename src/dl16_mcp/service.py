@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 from typing import Any
 
 from . import backend
@@ -11,6 +10,7 @@ from .analysis import (glitch_filter, measure_pwm, measure_skew, preview_edges,
                        search_conditions, to_edges_csv, to_vcd)
 from .artifacts import Waveform, load_atkdl, load_capture
 from .config import CAPTURE_ID_RE, CaptureRequest, captures_dir, exports_dir
+from .decoders import decode_i2c, decode_spi, decode_uart
 
 
 def logic_status() -> dict[str, Any]:
@@ -149,42 +149,30 @@ def logic_search(capture_id: str, conditions: list, limit: int = 100,
 
 def logic_decode(capture_id: str, protocol: str, channels: list[int],
                  baud_rate: int = 115200, cpol: int = 0, cpha: int = 0,
-                 atkdl_file: str | None = None) -> dict[str, Any]:
-    """Use upstream's Python decoder module after bootstrap-native (no GUI needed)."""
-    import sys
-    from pathlib import Path
-    root = Path(__file__).resolve().parents[2]
-    upstream = root / "external" / "ATK-Logic-Mcp"
-    if not upstream.is_dir():
-        return {"success": False, "error_code": "DECODER_BACKEND_MISSING",
-                "message": "Run scripts/bootstrap-native.ps1 to install upstream UART/I2C/SPI decoders"}
-    if str(upstream) not in sys.path:
-        sys.path.insert(0, str(upstream))
+                 atkdl_file: str | None = None, data_bits: int = 8, parity: str = "none",
+                 stop_bits: int = 1, invert: bool = False, bit_order: str = "msb",
+                 bits_per_word: int = 8) -> dict[str, Any]:
+    """Decode UART/I2C/SPI with the in-repo offline decoders (no native checkout)."""
     try:
-        import importlib
-        decoder_module = importlib.import_module("analysis.decoders")
-        if not Path(decoder_module.__file__).resolve().is_relative_to(upstream.resolve()):
-            raise ImportError("Refusing non-pinned analysis.decoders module")
-        decode_uart, decode_i2c, decode_spi = (
-            decoder_module.decode_uart, decoder_module.decode_i2c, decoder_module.decode_spi)
         waves = [_load(capture_id, c, atkdl_file=atkdl_file) for c in channels]
         if not waves or len({w.sample_rate_hz for w in waves}) != 1:
             raise ValueError("Decoder channels must share a sample rate")
-        sr = waves[0].sample_rate_hz
         if protocol == "uart" and len(waves) == 1:
-            data = decode_uart(waves[0].raw, sr, baud_rate=baud_rate)
+            data = decode_uart(waves[0], baud_rate=baud_rate, data_bits=data_bits,
+                               parity=parity, stop_bits=stop_bits, invert=invert)
         elif protocol == "i2c" and len(waves) == 2:
-            data = decode_i2c(waves[0].raw, waves[1].raw, sr)
+            data = decode_i2c(waves[0], waves[1])
         elif protocol == "spi" and 2 <= len(waves) <= 4:
-            data = decode_spi(waves[0].raw, waves[1].raw,
-                              waves[2].raw if len(waves) >= 3 else None,
-                              waves[3].raw if len(waves) == 4 else None,
-                              sr, cpol=cpol, cpha=cpha)
+            data = decode_spi(waves[0], waves[1],
+                              waves[2] if len(waves) >= 3 else None,
+                              waves[3] if len(waves) == 4 else None,
+                              cpol=cpol, cpha=cpha, bit_order=bit_order,
+                              bits_per_word=bits_per_word)
         else:
             raise ValueError("Use uart:[rx], i2c:[scl,sda], spi:[clk,mosi,(miso),(cs)]")
         return {"success": True, "protocol": protocol, "channel_mapping": channels,
                 "event_count": len(data), "events": data[:200],
                 "truncated": len(data) > 200, "evidence_source": waves[0].source,
                 "data_integrity": waves[0].integrity}
-    except (ImportError, ValueError, FileNotFoundError, OSError, KeyError) as exc:
+    except (ValueError, FileNotFoundError, OSError, KeyError) as exc:
         return {"success": False, "error_code": "DECODE_FAILED", "message": str(exc)}

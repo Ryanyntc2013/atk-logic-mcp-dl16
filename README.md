@@ -112,7 +112,7 @@ For Cursor, add to `.cursor/mcp.json` or the user's MCP settings, with a **full 
 | `logic_export` | Offline tested | Edge-based VCD / edge-CSV export of one channel |
 | `logic_filter` | Offline tested | Glitch removal (drop short pulses) into a derived capture |
 | `logic_search` | Offline tested | Sample positions matching multi-channel conditions |
-| `logic_decode` | Adapter; requires native checkout | UART/I2C/SPI via pinned upstream Python decoder |
+| `logic_decode` | Offline tested | UART (parity/stop/invert), I2C, SPI (modes 0-3, bit order), in-repo |
 
 MCP SDK is deliberately pinned to the v1 maintenance API (`mcp>=1.28,<2`) so the tested `mcp.server.fastmcp` entry point does not silently switch major versions.
 

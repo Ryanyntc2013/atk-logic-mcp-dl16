@@ -82,9 +82,13 @@ def logic_search(capture_id: str, conditions: list, limit: int = 100,
 @mcp.tool()
 def logic_decode(capture_id: str, protocol: str, channels: list[int],
                  baud_rate: int = 115200, cpol: int = 0, cpha: int = 0,
-                 atkdl_file: str | None = None) -> dict:
-    """Decode UART, I2C or SPI via pinned upstream decoder after native bootstrap."""
-    return service.logic_decode(capture_id, protocol, channels, baud_rate, cpol, cpha, atkdl_file)
+                 atkdl_file: str | None = None, data_bits: int = 8, parity: str = "none",
+                 stop_bits: int = 1, invert: bool = False, bit_order: str = "msb",
+                 bits_per_word: int = 8) -> dict:
+    """Decode UART (parity/stop/invert), I2C, or SPI (modes 0-3, bit order) offline."""
+    return service.logic_decode(capture_id, protocol, channels, baud_rate, cpol, cpha,
+                                atkdl_file, data_bits, parity, stop_bits, invert,
+                                bit_order, bits_per_word)
 
 
 def main() -> None:
