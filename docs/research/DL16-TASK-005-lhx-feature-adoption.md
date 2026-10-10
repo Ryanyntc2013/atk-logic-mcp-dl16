@@ -24,7 +24,7 @@ discipline unchanged.
 | Capture dir `manifest.json` + `wire.bin` (raw packets) + `channel-NN.bin` | medium | `meta.json` + `chNN.bits` + `edges.json` (raw bits kept; raw USB packets not) | **ADAPT** (consider retaining raw packets) |
 | `--sample-index` default pick, `--force` overwrite protection | low | fixed rate map; new dir per capture | **ADOPTED (overwrite protection)**; sample-index fixed |
 | Silent success output; measurements print only requested values | low | returns JSON | acceptable |
-| `skills/dl16-cli` Codex Skill packaging | medium | none | **PROPOSE** |
+| `skills/dl16-cli` Codex Skill packaging | medium | agent-facing tool reference `docs/MCP-TOOLS.md` added | **ADOPTED (as docs)** |
 
 ## Adopted now (this change)
 

@@ -116,6 +116,8 @@ For Cursor, add to `.cursor/mcp.json` or the user's MCP settings, with a **full 
 
 MCP SDK is deliberately pinned to the v1 maintenance API (`mcp>=1.28,<2`) so the tested `mcp.server.fastmcp` entry point does not silently switch major versions.
 
+Full parameter reference, native helper tools and evidence tiers: [docs/MCP-TOOLS.md](docs/MCP-TOOLS.md).
+
 No `send_raw`, firmware flash, driver installation, undocumented MCU write, or automatically invoked power cycling tool exists in the MCP interface.
 
 ## Quality model
