@@ -12,7 +12,7 @@ Build: pinned CPP `5fc47744` + two tracked, idempotent build patches (see below)
 | B1 rate indices | PASS: 1/4/5/6/7/8/9/10/11/12/13 MHz verified via PWM loopback; index 7 (25 MHz) and 13 (500 MHz) work here; LHX index-7 no-data / 500M=0 **not reproduced** |
 | B2 instant capture | PASS: COMPLETE, exact sample counts |
 | B3 edge gating | Initially **not gated** with the 9-byte payload (matches HUGEL) |
-| B4 order-3/tails | offline covered; live raw cross-compare not done |
+| B4 order-3/tails + alignment | Alignment **PASS**: trigger edge at `total × position%`, pre-trigger precedes it (DL16-TASK-013); raw packet byte cross-compare still not done |
 | B5 skew | not run (requires split wiring) |
 | B6 repeat reliability | 50 % raw (deterministic post-capture open failure) -> **100 %** with bounded backend retry |
 
@@ -57,6 +57,6 @@ never claimed modified. Toolset defaults to installed VS2019 (`v142`) with fallb
 
 - Trigger timeout + multi-channel trigger conditions (position now exposed).
 - Persistent JSONL session; Stream capture; hardware RLE; raw wire-packet retention.
-- B4 live raw order-3/tail cross-compare and returned-buffer pre-trigger alignment.
+- B4 raw packet byte cross-compare (alignment itself verified, DL16-TASK-013).
 - B5 common-source skew (requires split wiring).
 - sigrok external decoder handoff (optional; VCD export already enables it).
