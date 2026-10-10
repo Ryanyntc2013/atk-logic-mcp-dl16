@@ -128,6 +128,10 @@ Opt-in depth-stop-v1 completed20 exact CH8/CH14 requests,200000 samples/channel,
 
 Reviewed helper started PWM0=1kHz/PWM1=2kHz,50percent;20/20 experimental captures valid. CH14 artifacts all measure2kHz/50percent with20 rising edges/window;CH8 is all-low with no expected1kHz. Both stop helper calls succeeded,postflight info passed. Output command success is not proof of sustained physical PWM0. Overall waveform FAIL;do not promote session. Next decision is isolated PWM setup/output persistence diagnosis versus single-owner session PWM interface. Full report [TASK-030](tasks/DL16-TASK-030-known-pwm-decision.md).
 
+## DL16-TASK-031 — PWM order isolation
+
+PWM0-only produced CH8~1kHz/50percent in both captures. Reverse setup PWM1->PWM0 yielded CH8=1kHz/50percent and CH14 all-low. Combined with TASK030 forward setup yielding only CH14, waveform follows last configured output under sequential standalone helper opens. Both channels' missing-source observations must not be attributed to capture alone. All4 captures valid,outputs stopped,postflight info passed. Next investigate two-output configuration in one ownership interval. See [TASK-031](tasks/DL16-TASK-031-pwm-order-isolation.md);session remains experimental.
+
 ## Build patches applied to the ignored checkout (reproducible)
 
 All local native changes are one patch: scripts/patches/atk-dl16-local-build.patch, applied
