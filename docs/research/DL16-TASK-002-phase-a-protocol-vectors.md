@@ -3,7 +3,7 @@
 **Date:** 2026-10-10
 **Status:** Phase A implemented (offline, no hardware). Phase B live gates remain `HIL_NOT_RUN`.
 **Reference implementation:** `tests/protocol_reference.py` (independent Python codec).
-**Vectors:** `tests/test_protocol_vectors.py` (33 tests) + `tests/vectors/dl16_protocol_vectors.json`. Full suite: 50 passed.
+**Vectors:** `tests/test_protocol_vectors.py` (34 tests, one of which runs the optional native harness) + `tests/vectors/dl16_protocol_vectors.json`. Full suite: 51 passed.
 
 Sources are pinned as in
 [`LHX369963-dl16-cli-cross-validation-2026-10-10.md`](LHX369963-dl16-cli-cross-validation-2026-10-10.md):
@@ -29,8 +29,23 @@ LHX `LHX369963/dl16-cli@8d7c209c1e3b13923620bb34cec915291a749612`.
 | Unknown rate fallback | **DIFF** | CPP silently defaults an unknown rate to 20 MHz index 6 (documented risk, not endorsed) | `test_unknown_rate_falls_back_to_20mhz_in_cpp` |
 | RLE channel data + tail | **AGREE** | order-1 RLE expands then trims to requested depth; extra bytes never counted | `test_rle_channel_data_then_finalize_preserves_depth` |
 | Golden artifact | **AGREE** | language-neutral `tests/vectors/dl16_protocol_vectors.json`, hash-locked | `test_golden_vectors_match_artifact` |
+| CPP<->Python cross-check | **AGREE** | native harness `tests/native/vector_dump.cpp` dumped real `atkdl16_core` output; byte-for-byte equal to the Python reference on crc/trigger/parameter/bank/device-frame | `test_native_cpp_matches_python_reference` |
 | Device/USB identity | **DIFF** | primary `1A86:FFCC`; LHX additionally accepts `1A86:6A6B`, `04B4:6A6A` (not merged) | matrix-only |
 | Trigger gating / alignment | **UNKNOWN** | requires a physical edge plus independent timing; `HIL_REQUIRED` | Phase B |
+
+## Optional native cross-check
+
+Prove the pinned C++ backend agrees with the Python reference byte-for-byte:
+
+```powershell
+powershell -File scripts/bootstrap-native.ps1        # build pinned core (once)
+powershell -File scripts/build-vector-harness.ps1    # build tests/native harness
+.\.venv\Scripts\python.exe -m pytest tests\test_protocol_vectors.py -q
+```
+
+The harness is optional and device-free; CI without a native build skips the
+cross-check (`test_native_cpp_matches_python_reference`). Set `DL16_VECTOR_HARNESS`
+to an alternate executable path.
 
 ## Deliberately preserved disagreements (not reconciled)
 

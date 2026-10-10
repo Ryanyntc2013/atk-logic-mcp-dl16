@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import pathlib
 import struct
+import subprocess
 import sys
 import zlib
 
@@ -370,3 +372,29 @@ def test_golden_vectors_match_artifact():
     assert v["device_frame_get_device_data_sha256"] == hashlib.sha256(
         ref.build_device_frame(0x10)).hexdigest()
     assert v["rx_frame_order6"] == ref.build_rx_frame(6, b"").hex()
+
+
+# --------------------------------------- optional native (CPP) cross-check
+
+NATIVE_HARNESS = pathlib.Path(__file__).parent / "native" / "build" / "Release" / "dl16-vector-dump.exe"
+
+
+def _native_harness() -> pathlib.Path | None:
+    env = os.environ.get("DL16_VECTOR_HARNESS")
+    if env and pathlib.Path(env).is_file():
+        return pathlib.Path(env)
+    return NATIVE_HARNESS if NATIVE_HARNESS.is_file() else None
+
+
+def test_native_cpp_matches_python_reference():
+    exe = _native_harness()
+    if exe is None:
+        pytest.skip("native harness not built; run scripts/build-vector-harness.ps1")
+    out = subprocess.run([str(exe)], capture_output=True, text=True, check=True).stdout
+    h = json.loads(out)
+    assert h["crc_123456789"] == format(ref.compute_crc32(b"123456789"), "08x")
+    assert h["crc_empty"] == format(ref.compute_crc32(b""), "08x")
+    assert h["trigger_payload"] == ref.trigger_payload_cpp([0], {0: "rising"}).hex()
+    assert h["parameter_payload"] == ref.parameter_payload(True, False, 1.6, 6, 400000, 36000).hex()
+    assert h["bank_transform_hex"] == ref.convert_to_device(bytes(range(256)) * 8).hex()
+    assert h["get_device_data_frame_hex"] == ref.build_device_frame(0x10).hex()
