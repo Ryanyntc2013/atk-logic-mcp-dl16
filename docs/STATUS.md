@@ -1,5 +1,11 @@
 # Release status 鈥?P0 scaffold, updated 2026-10-10
 
+## Source of truth
+
+- Hardware results (LOCAL_HIL): docs/HIL-PHASE-B-STATUS.md is the single authority. This file only indexes task outcomes.
+- Lint policy: ruff is required only for modules added after 2026-10-10; pre-existing files are not yet cleaned up, and CI runs pytest and compileall only.
+- Evidence capture: scripts/hil-evidence.ps1 -TaskDir artifacts/hil/DL16-TASK-xxx writes environment.json and SHA256SUMS.txt.
+
 ## Independently executed checks
 
 - Python offline suite: 69 passing tests on local Python 3.12 (core + DL16-TASK-002/004/005 protocol vectors and export); GitHub Actions Python offline CI successful.

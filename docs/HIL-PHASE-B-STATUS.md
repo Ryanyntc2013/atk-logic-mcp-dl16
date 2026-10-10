@@ -48,13 +48,12 @@ PWM0->CH8, PWM1->CH14 verified 1 kHz/2 kHz.)
 - Tracked patch exposes `--trigger-timeout`; HIL: `ch0:rising` with `--trigger-timeout 3`
   returns `CAPTURE_TIMEOUT` in ~3.7 s (default 30 s).
 
-## Build patches applied to the ignored checkout (tracked, idempotent)
+## Build patches applied to the ignored checkout (reproducible)
 
-1. libusb DLL import library (older local MSVC vs newer prebuilt static lib; C1900).
-2. 10-byte gated SimpleTrigger payload (non-immediate).
-
-Both are applied by `scripts/bootstrap-native.ps1`; the pinned commit content is
-never claimed modified. Toolset defaults to installed VS2019 (`v142`) with fallback.
+All local native changes are one patch: scripts/patches/atk-dl16-local-build.patch, applied
+by scripts/bootstrap-native.ps1 after eset --hard to the pinned commit (DL16-TASK-A1).
+It covers: libusb DLL import library (C1900), 10-byte gated SimpleTrigger, --trigger-position,
+multi-channel AND, --trigger-timeout. The pinned commit content is never claimed modified.
 
 ## Reproduced research items
 
