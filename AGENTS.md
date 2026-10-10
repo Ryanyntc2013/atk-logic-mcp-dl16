@@ -46,5 +46,15 @@ Build a stable, auditable MCP bridge for ALIENTEK DL16/DL16 Plus, combining the 
 Native optional: `powershell -File scripts/bootstrap-native.ps1` then native `atkdl16_tests.exe`.
 Never mark HIL validated from GitHub Actions alone: cloud CI has no DL16 attached.
 
-## First local mission
-Execute `DL16-TASK-001` in `docs/LOCAL-HANDOFF.md`. Preserve original report when modifying it; write findings to `artifacts/hil/` (ignored) and a redacted issue or PR summary.
+## Cross-source protocol review / compatibility gates
+- **Mandatory reading for protocol or capture work:** `docs/research/LHX369963-dl16-cli-cross-validation-2026-10-10.md` and `docs/tasks/DL16-TASK-002.md`.
+- Treat published 2026 LHX hardware reports as **REPORTED_HIL** only, not validation on the owner's physical instrument.
+- Known source conflicts: 25/500 MHz rate codes, 9/10-byte simple trigger payload, 512-byte short replies, trigger gating, order-3 crop and RLE/buffer/stream tails. Don't silently prefer one implementation; add **versioned offline vectors** and require local evidence before changing live behavior.
+- LHX snapshot has no explicit public `LICENSE` file: do not copy, vendor or translate code verbatim without resolved permission. Source links and behavioral test descriptions are allowed; implement independently if needed.
+- Do not modify ignored `external/ATK-Logic-Mcp` and claim the changes are persisted; use a tracked, pinned fork or reviewable patch with CI.
+- Never auto-reset USB/clear endpoints/replace drivers merely because another project's recovery routine uses them. Operator approval still required.
+
+## First local mission / next numbered task
+1. Execute or verify `DL16-TASK-001` in `docs/LOCAL-HANDOFF.md` for physical device baseline; if not yet possible, report `NEEDS_HUMAN_HIL`.
+2. Execute **Phase A** of `DL16-TASK-002` in `docs/tasks/DL16-TASK-002.md` autonomously, including offline protocol vector tests and CI. Phase B live tests depend on confirmed device, safe wiring and permissions.
+3. Preserve task-specific reports under `artifacts/hil/DL16-TASK-###/` (ignored), file redacted GitHub summaries, and hand over exact pass/fail evidence.
