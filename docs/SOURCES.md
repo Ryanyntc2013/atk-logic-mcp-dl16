@@ -30,6 +30,10 @@ See [LHX cross-validation research](research/LHX369963-dl16-cli-cross-validation
 - Model-dependent max sample rates, trigger semantics, and RLE capacities remain to be measured locally.
 - No claim is made that vendor `.atkdl` stored-file integrity equates to physical capture completeness.
 
+## Host-side session evidence journal (DL16-TASK-020)
+
+The optional session journal is independently implemented host-side JSONL logging, not a USB protocol implementation or translation of LHX source. It records caller declarations and native responses with their distinct authority; binary/file SHA-256 establishes byte identity, not physical authenticity or hardware acceptance. It does not retain raw USB traffic or retrospectively strengthen TASK-018 console-transcribed evidence. See [TASK-020](tasks/DL16-TASK-020-session-evidence-journal.md).
+
 ## License hygiene
 
 - Keep provenance, git commit IDs and third-party NOTICE when embedding source in the future.

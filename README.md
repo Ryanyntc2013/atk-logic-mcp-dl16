@@ -51,7 +51,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\setup-windows.ps1
 .\.venv\Scripts\dl16ctl.exe status
 ```
 
-The setup script checks out a PINNED upstream source in ignored `external/ATK-Logic-Mcp/`, compiles native CLI and runs its **offline** C++ unit tests. It does not operate a connected device during setup.
+The setup script checks out a PINNED upstream source in ignored `external/ATK-Logic-Mcp/`, compiles the native CLI and runs upstream tests. The native suite includes `test_device_open_hardware` and may open a connected device; do not treat setup/bootstrap as strictly offline. For the current implementation and hardware evidence baseline, start with [LOCAL-HANDOFF](docs/LOCAL-HANDOFF.md).
 
 If only offline work is possible, use `-SkipNative` during setup. To build later: `powershell -File .\scripts\bootstrap-native.ps1`.
 
@@ -87,6 +87,14 @@ For Cursor, add to `.cursor/mcp.json` or the user's MCP settings, with a **full 
 ```
 
 `DL16_CLI_PATH` can override the native executable location; `DL16_DATA_DIR` sets the storage root, by default `./artifacts`. Prefer absolute paths in Agent sessions.
+
+### Experimental session evidence (DL16-TASK-020)
+
+One-shot remains the default. Persistent capture (`DL16_BACKEND_MODE=session`) is experimental and has not passed corrected-channel HIL. Keep the B6 one-shot retry; do not use a cached session status as a fresh FPGA query.
+
+The optional `DL16_SESSION_JOURNAL_DIR` setting enables local, durable request/response evidence for session mode. Use an absolute path in an ignored task evidence directory. Journal files may contain local paths, native responses and signal metadata: retain originals locally and share only separately redacted summaries. Logging is not raw USB capture, calibration, or proof of physical signal provenance.
+
+See [TASK-020 acceptance and hardware gate](docs/tasks/DL16-TASK-020-session-evidence-journal.md). Setting logging options does not authorize hardware access; current device connection, safe wiring and voltage must be confirmed before live commands.
 
 ### Local capture example (ONLY with known safe wiring)
 
