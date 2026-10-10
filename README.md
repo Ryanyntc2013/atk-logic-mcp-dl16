@@ -110,6 +110,8 @@ For Cursor, add to `.cursor/mcp.json` or the user's MCP settings, with a **full 
 | `logic_measure_skew` | Offline tested | Signed pairwise delay, P95/P99, missing/extra pulses |
 | `logic_measure_pwm` | Offline tested | Median-period frequency and period jitter |
 | `logic_export` | Offline tested | Edge-based VCD / edge-CSV export of one channel |
+| `logic_filter` | Offline tested | Glitch removal (drop short pulses) into a derived capture |
+| `logic_search` | Offline tested | Sample positions matching multi-channel conditions |
 | `logic_decode` | Adapter; requires native checkout | UART/I2C/SPI via pinned upstream Python decoder |
 
 MCP SDK is deliberately pinned to the v1 maintenance API (`mcp>=1.28,<2`) so the tested `mcp.server.fastmcp` entry point does not silently switch major versions.

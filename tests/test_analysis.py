@@ -1,7 +1,8 @@
 import numpy as np
 import pytest
 from dl16_mcp.analysis import (AnalysisError, digital_edges, digital_transitions,
-                               measure_pwm, measure_skew, to_edges_csv, to_vcd)
+                               glitch_filter, measure_pwm, measure_skew, search_conditions,
+                               to_edges_csv, to_vcd)
 from dl16_mcp.artifacts import Waveform
 
 
@@ -104,3 +105,34 @@ def test_to_vcd_is_edge_based_with_initial_level():
     assert "#0" in lines and "0!" in lines
     assert "#50" in lines and "#150" in lines  # 20 MHz -> 50 ns/sample
     assert lines[-1] == "0!"  # final fall back to low
+
+
+def _bits(w):
+    return np.unpackbits(np.frombuffer(w.raw, dtype=np.uint8), bitorder="little")[:w.samples]
+
+
+def test_glitch_filter_removes_short_pulses():
+    w = wave(0, [1, 1, 1, 0, 1, 1, 1, 1])
+    filtered, removed = glitch_filter(w.raw, w.samples, min_pulse_samples=3)
+    got = np.unpackbits(np.frombuffer(filtered, dtype=np.uint8), bitorder="little")[:8]
+    assert got.tolist() == [1] * 8
+    assert removed == 1
+
+
+def test_glitch_filter_leading_short_run_takes_next_level():
+    w = wave(0, [1, 0, 0, 0])
+    filtered, removed = glitch_filter(w.raw, w.samples, min_pulse_samples=3)
+    got = np.unpackbits(np.frombuffer(filtered, dtype=np.uint8), bitorder="little")[:4]
+    assert got.tolist() == [0, 0, 0, 0]
+    assert removed == 1
+
+
+def test_search_conditions_and_semantics():
+    ch0 = wave(0, [0, 0, 1, 1, 0, 0, 0, 0])
+    ch1 = wave(1, [0, 0, 1, 1, 1, 1, 0, 0])
+    waves = {0: ch0, 1: ch1}
+    r = search_conditions(waves, [(0, "rising"), (1, "high")])
+    assert r["total_matches"] == 1
+    assert r["matches"][0]["sample"] == 2
+    assert search_conditions(waves, [(0, "rising"), (1, "low")])["total_matches"] == 0
+    assert search_conditions(waves, [(1, "high")])["total_matches"] == 4

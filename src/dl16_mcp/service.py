@@ -1,14 +1,16 @@
 """Application layer shared by MCP tools and local CLI."""
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
 
 from . import backend
-from .analysis import measure_pwm, measure_skew, preview_edges, to_edges_csv, to_vcd
+from .analysis import (glitch_filter, measure_pwm, measure_skew, preview_edges,
+                       search_conditions, to_edges_csv, to_vcd)
 from .artifacts import Waveform, load_atkdl, load_capture
-from .config import CaptureRequest, exports_dir
+from .config import CAPTURE_ID_RE, CaptureRequest, captures_dir, exports_dir
 
 
 def logic_status() -> dict[str, Any]:
@@ -83,6 +85,66 @@ def logic_export(capture_id: str, channel: int, fmt: str = "vcd",
                 "evidence_source": wave.source, "integrity": wave.integrity}
     except (ValueError, FileNotFoundError, OSError, KeyError) as exc:
         return {"success": False, "error_code": "EXPORT_FAILED", "message": str(exc)}
+
+
+_CONDITION_RE = re.compile(r"^(?:ch)?(\d{1,2})\s*[:=]\s*(rising|falling|high|low)$", re.IGNORECASE)
+
+
+def _parse_condition(condition) -> tuple[int, str]:
+    if isinstance(condition, (list, tuple)) and len(condition) == 2:
+        channel, kind = int(condition[0]), str(condition[1]).lower()
+    elif isinstance(condition, str):
+        match = _CONDITION_RE.fullmatch(condition.strip())
+        if not match:
+            raise ValueError(f"Invalid condition: {condition!r}")
+        channel, kind = int(match.group(1)), match.group(2).lower()
+    else:
+        raise ValueError(f"Invalid condition: {condition!r}")
+    if not 0 <= channel <= 15:
+        raise ValueError("Condition channel must be 0..15")
+    return channel, kind
+
+
+def logic_filter(capture_id: str, channel: int, min_pulse_samples: int,
+                 atkdl_file: str | None = None, out_name: str | None = None) -> dict[str, Any]:
+    """Write a derived capture with pulses shorter than min_pulse_samples removed."""
+    try:
+        wave = _load(capture_id, channel, atkdl_file=atkdl_file)
+        filtered, removed = glitch_filter(wave.raw, wave.samples, min_pulse_samples=min_pulse_samples)
+        new_id = out_name or f"{capture_id}-filt{min_pulse_samples}-ch{channel:02d}"
+        if not CAPTURE_ID_RE.fullmatch(new_id):
+            raise ValueError("Unsafe derived capture id")
+        folder = captures_dir() / new_id
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"ch{channel:02d}.bits").write_bytes(filtered)
+        meta = {
+            "capture_id": new_id, "derived_from": capture_id, "transform": "glitch_filter",
+            "min_pulse_samples": min_pulse_samples, "channel": channel,
+            "sample_rate": wave.sample_rate_hz, "requested_samples": wave.samples,
+            "sample_counts": {str(channel): wave.samples}, "data_integrity": "COMPLETE",
+            "capture_complete_received": True, "trigger_ack_received": True,
+            "evidence_source": "DERIVED",
+        }
+        (folder / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+        return {"success": True, "derived_capture_id": new_id, "channel": channel,
+                "removed_pulses": removed, "path": str(folder), "source_evidence": wave.source}
+    except (ValueError, FileNotFoundError, OSError, KeyError) as exc:
+        return {"success": False, "error_code": "FILTER_FAILED", "message": str(exc)}
+
+
+def logic_search(capture_id: str, conditions: list, limit: int = 100,
+                 atkdl_file: str | None = None) -> dict[str, Any]:
+    """Find samples matching all channel conditions (rising/falling/high/low)."""
+    try:
+        parsed = [_parse_condition(c) for c in conditions]
+        waves: dict[int, Waveform] = {}
+        for channel, _ in parsed:
+            waves[channel] = _load(capture_id, channel, atkdl_file=atkdl_file)
+        result = search_conditions(waves, parsed, limit=limit)
+        result["evidence_source"] = next(iter(waves.values())).source
+        return result
+    except (ValueError, FileNotFoundError, OSError, KeyError) as exc:
+        return {"success": False, "error_code": "SEARCH_FAILED", "message": str(exc)}
 
 
 def logic_decode(capture_id: str, protocol: str, channels: list[int],

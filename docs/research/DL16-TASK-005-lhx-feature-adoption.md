@@ -16,8 +16,8 @@ discipline unchanged.
 | Trigger position (`--trigger-position`), `--trigger-timeout`, multi-channel `--trigger-states` | high | only `chN:edge`; position hardcoded 10%; gating not functional (B3) | **DEFER / investigate** (native param) |
 | Hardware RLE | medium | not enabled | **DEFER** |
 | `capture measure` (frequency/duty) | high | `logic_measure_pwm` | **ADOPTED** |
-| `capture filter` (drop short pulses -> new capture) | medium | not present | **PROPOSE** |
-| `capture search` (multi-channel conditions) | medium | not present | **PROPOSE** |
+| `capture filter` (drop short pulses -> new capture) | medium | **`logic_filter` added now** | **ADOPTED** |
+| `capture search` (multi-channel conditions) | medium | **`logic_search` added now** | **ADOPTED** |
 | `capture export` CSV / edges / VCD (streaming) | high | **`logic_export` (VCD + edges CSV) added now** | **ADOPTED** |
 | Native decoders: UART (5–9 bits, parity, stop, invert), SPI modes/bit order | medium | basic UART/I2C/SPI via upstream | **PROPOSE** |
 | sigrok integration (`capture sigrok`) | medium | not present | **PROPOSE / optional** |

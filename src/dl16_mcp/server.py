@@ -66,6 +66,20 @@ def logic_export(capture_id: str, channel: int, fmt: str = "vcd",
 
 
 @mcp.tool()
+def logic_filter(capture_id: str, channel: int, min_pulse_samples: int,
+                 atkdl_file: str | None = None, out_name: str | None = None) -> dict:
+    """Write a derived capture with pulses shorter than min_pulse_samples removed."""
+    return service.logic_filter(capture_id, channel, min_pulse_samples, atkdl_file, out_name)
+
+
+@mcp.tool()
+def logic_search(capture_id: str, conditions: list, limit: int = 100,
+                 atkdl_file: str | None = None) -> dict:
+    """Find samples where every condition holds, e.g. ["ch7=rising", "ch15=high"]."""
+    return service.logic_search(capture_id, conditions, limit, atkdl_file)
+
+
+@mcp.tool()
 def logic_decode(capture_id: str, protocol: str, channels: list[int],
                  baud_rate: int = 115200, cpol: int = 0, cpha: int = 0,
                  atkdl_file: str | None = None) -> dict:

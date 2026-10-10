@@ -236,3 +236,78 @@ def to_edges_csv(wave: Waveform, *, polarity: str = "rising",
     rows = ["sample,time_ns,level"]
     rows.extend(f"{int(s)},{int(round(int(s) * ns_per_sample))},{level}" for s in idx)
     return "\n".join(rows) + "\n"
+
+
+def glitch_filter(raw: bytes, sample_count: int, *, min_pulse_samples: int,
+                  max_edges: int = 2_000_000) -> tuple[bytes, int]:
+    """Return (filtered_bits, removed_pulse_count).
+
+    Any run shorter than min_pulse_samples is replaced by the surrounding stable
+    level (a leading short run takes the next run's level). Never drops samples.
+    """
+    if min_pulse_samples < 1:
+        raise AnalysisError("min_pulse_samples must be positive")
+    if sample_count < 0 or sample_count > len(raw) * 8:
+        raise AnalysisError("Invalid sample count for packed waveform")
+    if sample_count == 0:
+        return b"", 0
+    bits = np.unpackbits(np.frombuffer(raw, dtype=np.uint8), bitorder="little")[:sample_count]
+    changes = np.flatnonzero(np.diff(bits.astype(np.int8)) != 0) + 1
+    starts = np.concatenate(([0], changes))
+    ends = np.concatenate((changes, [sample_count]))
+    if len(starts) - 1 > max_edges:
+        raise AnalysisError("Too many runs: narrow the analysis window")
+    out = bits.copy()
+    removed = 0
+    last_stable: int | None = None
+    for i, (s, e) in enumerate(zip(starts, ends)):
+        if e - s >= min_pulse_samples:
+            last_stable = int(bits[s])
+        else:
+            if last_stable is None:
+                nxt = int(bits[starts[i + 1]]) if i + 1 < len(starts) else 0
+                out[s:e] = nxt
+            else:
+                out[s:e] = last_stable
+            removed += 1
+    return np.packbits(out, bitorder="little").tobytes(), removed
+
+
+def search_conditions(waves: dict[int, Waveform], conditions, *, limit: int = 100,
+                      max_samples: int = 200_000_000) -> dict[str, Any]:
+    """Sample indices where every (channel, kind) condition holds simultaneously.
+
+    kind is rising / falling (edge index) or high / low (level at that sample).
+    """
+    if not conditions:
+        raise AnalysisError("At least one condition is required")
+    if not 1 <= limit <= 10_000:
+        raise AnalysisError("limit must be 1..10000")
+    counts = {ch: waves[ch].samples for ch, _ in conditions}
+    if len(set(counts.values())) != 1:
+        raise AnalysisError("All condition channels must share a sample count")
+    n = next(iter(counts.values()))
+    if n > max_samples:
+        raise AnalysisError("Capture too large for in-memory search; narrow it first")
+    if n == 0:
+        return {"success": True, "total_matches": 0, "returned": 0, "matches": [], "truncated": False}
+    rate = waves[conditions[0][0]].sample_rate_hz
+    mask = np.ones(n, dtype=bool)
+    for ch, kind in conditions:
+        w = waves[ch]
+        if kind in ("high", "low"):
+            bits = np.unpackbits(np.frombuffer(w.raw, dtype=np.uint8),
+                                 bitorder="little")[:n].astype(bool)
+            m = bits if kind == "high" else ~bits
+        elif kind in ("rising", "falling"):
+            idx = digital_edges(w.raw, n, rising=kind == "rising")
+            m = np.zeros(n, dtype=bool)
+            m[idx[idx < n]] = True
+        else:
+            raise AnalysisError("Condition kind must be rising/falling/high/low")
+        mask &= m
+    total = int(mask.sum())
+    hits = np.flatnonzero(mask)[:limit]
+    return {"success": True, "total_matches": total, "returned": int(hits.size),
+            "matches": [{"sample": int(s), "time_ns": float(s) * 1e9 / rate} for s in hits],
+            "truncated": total > int(hits.size)}

@@ -24,6 +24,16 @@ def main() -> int:
     e.add_argument("--channel", type=int, default=0)
     e.add_argument("--format", dest="fmt", default="vcd", choices=["vcd", "edges"])
     e.add_argument("--polarity", default="rising", choices=["rising", "falling"])
+    f = cmd.add_parser("filter")
+    f.add_argument("capture_id")
+    f.add_argument("--channel", type=int, default=0)
+    f.add_argument("--min-pulse-samples", type=int, required=True)
+    f.add_argument("--out")
+    se = cmd.add_parser("search")
+    se.add_argument("capture_id")
+    se.add_argument("--condition", action="append", required=True,
+                    help="chN=rising|falling|high|low (repeatable, AND)")
+    se.add_argument("--limit", type=int, default=100)
     args = p.parse_args()
     if args.command == "status":
         result = service.logic_status()
@@ -33,6 +43,11 @@ def main() -> int:
                                        args.trigger)
     elif args.command == "export":
         result = service.logic_export(args.capture_id, args.channel, args.fmt, args.polarity)
+    elif args.command == "filter":
+        result = service.logic_filter(args.capture_id, args.channel, args.min_pulse_samples,
+                                      out_name=args.out)
+    elif args.command == "search":
+        result = service.logic_search(args.capture_id, args.condition, args.limit)
     else:
         result = service.logic_measure_skew(args.capture_id, args.ref, args.target,
                                             max_abs_error_ns=args.limit_ns)
