@@ -1,5 +1,5 @@
 diff --git a/cli/main.cpp b/cli/main.cpp
-index 4022aeb..b6526c7 100644
+index 4022aeb..941f6ba 100644
 --- a/cli/main.cpp
 +++ b/cli/main.cpp
 @@ -3,11 +3,14 @@
@@ -22,7 +22,7 @@ index 4022aeb..b6526c7 100644
  }
  
 +static bool session_number(const session::Value& v,const std::string& key,double& out){auto p=session::get(v,key);if(!p||p->kind!=session::Value::Kind::Number)return false;try{size_t n=0;out=std::stod(p->scalar,&n);return n==p->scalar.size()&&std::isfinite(out);}catch(...){return false;}}
-+static bool session_channels(const session::Value& v,std::vector<uint8_t>& out){auto p=session::get(v,"channels");if(!p||p->kind!=session::Value::Kind::Array||p->array.empty()||p->array.size()>16)return false;for(const auto& x:p->array){if(x.kind!=session::Value::Kind::Number||x.scalar.find_first_of(".eE")!=std::string::npos)return false;try{size_t n=0;long ch=std::stol(x.scalar,&n);if(n!=x.scalar.size()||ch<0||ch>15)return false;auto c=static_cast<uint8_t>(ch);if(std::find(out.begin(),out.end(),c)!=out.end())return false;out.push_back(c);}catch(...){return false;}}return true;}
++static bool session_channels(const session::Value& v,std::vector<uint8_t>& out){return session::parse_channels(v,out);}
 +static bool valid_session_trigger(const std::string& spec){
 +    if(spec.empty()||spec=="immediate"||spec=="none")return true;
 +    size_t start=0;while(start<spec.size()){size_t comma=spec.find(',',start);std::string part=spec.substr(start,comma==std::string::npos?std::string::npos:comma-start);if(part.empty())return false;if(part.rfind("ch",0)==0)part=part.substr(2);auto colon=part.find(':');if(colon==std::string::npos)return false;try{size_t used=0;int ch=std::stoi(part.substr(0,colon),&used);if(used!=colon||ch<0||ch>15)return false;}catch(...){return false;}auto edge=part.substr(colon+1);if(edge!="rising"&&edge!="falling"&&edge!="high"&&edge!="low"&&edge!="both"&&edge!="double")return false;start=comma==std::string::npos?spec.size():comma+1;}return true;
@@ -90,8 +90,125 @@ index 4022aeb..b6526c7 100644
  
      if (cmd == "list") {
          auto devices = Device::enumerate();
+diff --git a/cli/session_protocol.h b/cli/session_protocol.h
+new file mode 100644
+index 0000000..911ead7
+--- /dev/null
++++ b/cli/session_protocol.h
+@@ -0,0 +1,111 @@
++#pragma once
++
++#include "atkdl16/json_util.h"
++#include <cctype>
++#include <algorithm>
++#include <cstdint>
++#include <limits>
++#include <map>
++#include <string>
++#include <vector>
++
++namespace atkdl16::session {
++struct Value {
++    enum class Kind { Null, Boolean, Number, String, Object, Array } kind{Kind::Null};
++    bool boolean{false};
++    std::string scalar;
++    std::map<std::string, Value> object;
++    std::vector<Value> array;
++};
++
++class Parser {
++public:
++    explicit Parser(const std::string& text) : text_(text) {}
++    bool parse(Value& out, std::string& error) {
++        skip();
++        if (!parse_value(out, 0)) return fail(error_ , error);
++        skip();
++        if (pos_ != text_.size()) return fail("trailing data", error);
++        if (out.kind != Value::Kind::Object) return fail("request must be an object", error);
++        return true;
++    }
++private:
++    std::string text_;
++    size_t pos_{0};
++    std::string error_;
++    bool fail(const std::string& msg, std::string& out) { out = msg + " at byte " + std::to_string(pos_); return false; }
++    void skip() { while (pos_ < text_.size() && std::isspace(static_cast<unsigned char>(text_[pos_]))) ++pos_; }
++    bool consume(const char* word) {
++        size_t n=0; while(word[n]) ++n;
++        if(text_.compare(pos_,n,word)!=0)return false; pos_+=n; return true;
++    }
++    static void append_utf8(std::string& s, unsigned cp) {
++        if(cp<0x80)s.push_back(static_cast<char>(cp));
++        else if(cp<0x800){s.push_back(static_cast<char>(0xc0|(cp>>6)));s.push_back(static_cast<char>(0x80|(cp&63)));}
++        else if(cp<0x10000){s.push_back(static_cast<char>(0xe0|(cp>>12)));s.push_back(static_cast<char>(0x80|((cp>>6)&63)));s.push_back(static_cast<char>(0x80|(cp&63)));}
++        else{s.push_back(static_cast<char>(0xf0|(cp>>18)));s.push_back(static_cast<char>(0x80|((cp>>12)&63)));s.push_back(static_cast<char>(0x80|((cp>>6)&63)));s.push_back(static_cast<char>(0x80|(cp&63)));}
++    }
++    bool hex4(unsigned& cp){if(pos_+4>text_.size())return false;cp=0;for(int i=0;i<4;++i){char c=text_[pos_++];cp<<=4;if(c>='0'&&c<='9')cp|=c-'0';else if(c>='a'&&c<='f')cp|=c-'a'+10;else if(c>='A'&&c<='F')cp|=c-'A'+10;else return false;}return true;}
++    bool parse_string(std::string& s){
++        if(text_[pos_++]!='"')return false;
++        while(pos_<text_.size()){
++            unsigned char c=static_cast<unsigned char>(text_[pos_++]);
++            if(c=='"')return true;
++            if(c<0x20){error_="unescaped control";return false;}
++            if(c!='\\'){s.push_back(static_cast<char>(c));continue;}
++            if(pos_>=text_.size()){error_="truncated escape";return false;}
++            char e=text_[pos_++];
++            switch(e){case '"':s.push_back('"');break;case '\\':s.push_back('\\');break;case '/':s.push_back('/');break;case 'b':s.push_back('\b');break;case 'f':s.push_back('\f');break;case 'n':s.push_back('\n');break;case 'r':s.push_back('\r');break;case 't':s.push_back('\t');break;
++            case 'u':{unsigned cp;if(!hex4(cp)){error_="invalid unicode escape";return false;}if(cp>=0xd800&&cp<=0xdbff){if(pos_+2>text_.size()||text_[pos_]!='\\'||text_[pos_+1]!='u'){error_="unpaired surrogate";return false;}pos_+=2;unsigned lo;if(!hex4(lo)||lo<0xdc00||lo>0xdfff){error_="invalid low surrogate";return false;}cp=0x10000+((cp-0xd800)<<10)+(lo-0xdc00);}else if(cp>=0xdc00&&cp<=0xdfff){error_="unpaired surrogate";return false;}append_utf8(s,cp);break;}
++            default:error_="invalid escape";return false;}
++        }error_="unterminated string";return false;
++    }
++    bool parse_value(Value& v,unsigned depth){
++        if(depth>32){error_="nesting limit";return false;}skip();if(pos_>=text_.size()){error_="unexpected end";return false;}char c=text_[pos_];
++        if(c=='{')return parse_object(v,depth+1);if(c=='[')return parse_array(v,depth+1);
++        if(c=='"'){v.kind=Value::Kind::String;return parse_string(v.scalar);}
++        if(c=='t'&&consume("true")){v.kind=Value::Kind::Boolean;v.boolean=true;return true;}
++        if(c=='f'&&consume("false")){v.kind=Value::Kind::Boolean;return true;}
++        if(c=='n'&&consume("null")){v.kind=Value::Kind::Null;return true;}
++        if(c=='-'||(c>='0'&&c<='9'))return parse_number(v);
++        error_="invalid JSON token";return false;
++    }
++    bool parse_object(Value& v,unsigned d){++pos_;v.kind=Value::Kind::Object;skip();if(pos_<text_.size()&&text_[pos_]=='}'){++pos_;return true;}while(pos_<text_.size()){skip();if(pos_>=text_.size()||text_[pos_]!='"'){error_="object key expected";return false;}std::string k;if(!parse_string(k))return false;skip();if(pos_>=text_.size()||text_[pos_++]!=':'){error_="colon expected";return false;}Value x;if(!parse_value(x,d))return false;if(!v.object.emplace(k,std::move(x)).second){error_="duplicate key";return false;}skip();if(pos_<text_.size()&&text_[pos_]=='}'){++pos_;return true;}if(pos_>=text_.size()||text_[pos_++]!=','){error_="comma or object end expected";return false;}}error_="unterminated object";return false;}
++    bool parse_array(Value& v,unsigned d){++pos_;v.kind=Value::Kind::Array;skip();if(pos_<text_.size()&&text_[pos_]==']'){++pos_;return true;}while(pos_<text_.size()){Value x;if(!parse_value(x,d))return false;v.array.push_back(std::move(x));skip();if(pos_<text_.size()&&text_[pos_]==']'){++pos_;return true;}if(pos_>=text_.size()||text_[pos_++]!=','){error_="comma or array end expected";return false;}}error_="unterminated array";return false;}
++    bool parse_number(Value& v){size_t b=pos_;if(text_[pos_]=='-')++pos_;if(pos_>=text_.size()){error_="truncated number";return false;}if(text_[pos_]=='0')++pos_;else{if(text_[pos_]<'1'||text_[pos_]>'9'){error_="invalid number";return false;}while(pos_<text_.size()&&std::isdigit(static_cast<unsigned char>(text_[pos_])))++pos_;}if(pos_<text_.size()&&text_[pos_]=='.'){++pos_;size_t d=pos_;while(pos_<text_.size()&&std::isdigit(static_cast<unsigned char>(text_[pos_])))++pos_;if(d==pos_){error_="invalid fraction";return false;}}if(pos_<text_.size()&&(text_[pos_]=='e'||text_[pos_]=='E')){++pos_;if(pos_<text_.size()&&(text_[pos_]=='+'||text_[pos_]=='-'))++pos_;size_t d=pos_;while(pos_<text_.size()&&std::isdigit(static_cast<unsigned char>(text_[pos_])))++pos_;if(d==pos_){error_="invalid exponent";return false;}}v.kind=Value::Kind::Number;v.scalar=text_.substr(b,pos_-b);return true;}
++};
++inline const Value* get(const Value& v,const std::string& k){auto i=v.object.find(k);return i==v.object.end()?nullptr:&i->second;}
++inline bool parse_channels(const Value& request, std::vector<uint8_t>& channels) {
++    const auto* value = get(request, "channels");
++    if (!value || value->kind != Value::Kind::Array || value->array.empty() || value->array.size() > 16)
++        return false;
++    std::vector<uint8_t> parsed;
++    for (const auto& item : value->array) {
++        if (item.kind != Value::Kind::Number || item.scalar.find_first_of(".eE") != std::string::npos)
++            return false;
++        try {
++            size_t used = 0;
++            long channel = std::stol(item.scalar, &used);
++            if (used != item.scalar.size() || channel < 0 || channel > 15) return false;
++            auto ch = static_cast<uint8_t>(channel);
++            if (std::find(parsed.begin(), parsed.end(), ch) != parsed.end()) return false;
++            parsed.push_back(ch);
++        } catch (...) { return false; }
++    }
++    channels = std::move(parsed);
++    return true;
++}
++inline bool get_string(const Value& v,const std::string& k,std::string& s){auto p=get(v,k);if(!p||p->kind!=Value::Kind::String)return false;s=p->scalar;return true;}
++inline bool get_integer(const Value& v,const std::string& k,int& n){auto p=get(v,k);if(!p||p->kind!=Value::Kind::Number||p->scalar.find_first_of(".eE")!=std::string::npos)return false;try{size_t u=0;long x=std::stol(p->scalar,&u);if(u!=p->scalar.size()||x<std::numeric_limits<int>::min()||x>std::numeric_limits<int>::max())return false;n=static_cast<int>(x);return true;}catch(...){return false;}}
++inline std::string response(const std::string& id,const std::string& fields){return "{\"request_id\":\""+json_escape(id)+"\","+fields+"}\n";}
++inline std::string error_response(const std::string& id,const std::string& code,const std::string& message){return response(id,"\"ok\":false,\"error_code\":\""+json_escape(code)+"\",\"message\":\""+json_escape(message)+"\"");}
++inline std::string compact_json(const std::string& input){
++    std::string out;out.reserve(input.size());bool in_string=false,escaped=false;
++    for(unsigned char c:input){
++        if(in_string){out.push_back(static_cast<char>(c));if(escaped)escaped=false;else if(c=='\\')escaped=true;else if(c=='"')in_string=false;}
++        else if(c=='"'){in_string=true;out.push_back('"');}
++        else if(c!=' '&&c!='\t'&&c!='\r'&&c!='\n')out.push_back(static_cast<char>(c));
++    }
++    return out;
++}
++} // namespace atkdl16::session
 diff --git a/tests/unit/test_main.cpp b/tests/unit/test_main.cpp
-index d323467..a6ea442 100644
+index d323467..5599416 100644
 --- a/tests/unit/test_main.cpp
 +++ b/tests/unit/test_main.cpp
 @@ -6,6 +6,7 @@
@@ -102,7 +219,7 @@ index d323467..a6ea442 100644
  #include <iostream>
  #include <vector>
  #include <numeric>
-@@ -65,6 +66,31 @@ TEST_CASE(test_threshold_encoding) {
+@@ -65,6 +66,47 @@ TEST_CASE(test_threshold_encoding) {
      ASSERT_TRUE(std::abs(decode_threshold(code_neg) - (-1.5)) < 0.05);
  }
  
@@ -112,6 +229,22 @@ index d323467..a6ea442 100644
 +    ASSERT_TRUE(e.empty()); std::string id,label; int n=0;
 +    ASSERT_TRUE(session::get_string(v,"request_id",id)); ASSERT_TRUE(session::get_string(v,"label",label)); ASSERT_TRUE(session::get_integer(v,"n",n));
 +    ASSERT_EQ(id,std::string("r")); ASSERT_EQ(label,std::string("\xce\xbb\xf0\x9f\x9a\x80")); ASSERT_EQ(n,7);
++}
++TEST_CASE(test_session_channels_replace_defaults_and_validate_atomically) {
++    CaptureConfig cfg;
++    session::Value request; std::string error;
++    session::Parser parser("{\"channels\":[8,14]}");
++    ASSERT_TRUE(parser.parse(request, error));
++    ASSERT_TRUE(session::parse_channels(request, cfg.enabled_channels));
++    ASSERT_EQ(cfg.enabled_channels.size(), size_t{2});
++    ASSERT_EQ(cfg.enabled_channels[0], uint8_t{8});
++    ASSERT_EQ(cfg.enabled_channels[1], uint8_t{14});
++    session::Value invalid;
++    session::Parser duplicate("{\"channels\":[8,8]}");
++    ASSERT_TRUE(duplicate.parse(invalid, error));
++    ASSERT_FALSE(session::parse_channels(invalid, cfg.enabled_channels));
++    ASSERT_EQ(cfg.enabled_channels.size(), size_t{2});
++    ASSERT_EQ(cfg.enabled_channels[1], uint8_t{14});
 +}
 +TEST_CASE(test_session_json_parser_rejects_duplicates_and_trailing_bytes) {
 +    session::Value v;std::string e;session::Parser d("{\"x\":1,\"x\":2}");ASSERT_FALSE(d.parse(v,e));ASSERT_TRUE(e.find("duplicate")!=std::string::npos);

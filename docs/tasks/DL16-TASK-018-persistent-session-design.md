@@ -172,6 +172,13 @@ prove all capture modes, all firmware versions, or a general B6 fix.
 
 ## Current task status
 
+TASK-019 correction: the session parser appended CH8/CH14 to CaptureConfig's
+default CH0/CH1. Thus the prior session/one-shot runs were not identical-channel
+comparisons; their observed failures remain valid but the physical cause is not
+established. The parser and missing-header patch packaging are now corrected and
+verified by native regression and a genuinely fresh pinned clone build. See
+`DL16-TASK-019-session-remediation.md`. No new capture validation has been run.
+
 ### Completed offline implementation
 
 - Native worker: tracked `scripts/patches/atk-dl16-session.patch`; `bootstrap-native.ps1`

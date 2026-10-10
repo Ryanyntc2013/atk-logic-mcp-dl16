@@ -75,6 +75,13 @@ PWM0->CH8, PWM1->CH14 verified 1 kHz/2 kHz.)
 
 ## DL16-TASK-018-C (persistent-session comparison; acceptance FAILED)
 
+TASK-019 correction: session requests for CH8/CH14 accidentally retained default
+CH0/CH1; archived metadata shows four configured channels. The one-shot comparison
+configured only CH8/CH14, so identical-configuration conclusions are withdrawn.
+The parser and patch packaging have been repaired with a real parser regression
+and a fresh-clone build; no new capture HIL was performed. The zero-sample failure
+remains observed, its physical cause unresolved, and session remains unaccepted.
+
 - Wiring: PWM0->CH8, PWM1->CH14; 100 Hz and 1007 Hz, 50% duty. Capture: CH8+CH14,
   20 MHz, 10 ms (200,000 samples/channel), immediate trigger. GUI was not running.
 - Ownership probe: a second session received `DEVICE_OPEN_FAILED` with port-claimed text;

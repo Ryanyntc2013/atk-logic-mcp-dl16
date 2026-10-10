@@ -34,6 +34,11 @@ if ($LASTEXITCODE -ne 0) { throw 'Failed to checkout pinned commit' }
 # Only the IGNORED external checkout is reset; no upstream history is rewritten.
 git -C $Dst reset --hard $Commit | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Failed to reset ignored checkout to pinned commit' }
+# The protocol header is intentionally introduced by the session patch, but it is untracked
+# in the ignored checkout and therefore survives `git reset --hard`. Remove only that
+# patch-owned path before applying the tracked patch so repeated clean builds are reproducible.
+$SessionHeader = Join-Path $Dst 'cli\session_protocol.h'
+if (Test-Path $SessionHeader) { Remove-Item -LiteralPath $SessionHeader -Force }
 
 git -C $Dst apply --check $Patch
 if ($LASTEXITCODE -ne 0) { throw "Local patch does not apply cleanly to pinned commit: $Patch" }
