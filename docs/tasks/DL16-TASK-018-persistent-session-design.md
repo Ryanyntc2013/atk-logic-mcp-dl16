@@ -1,6 +1,6 @@
 # DL16-TASK-018 — persistent native JSONL session design
 
-**Status:** design approved for implementation planning; implementation and HIL not started.
+**Status:** TASK-018-A native JSONL worker implemented locally; Python process owner and HIL not started.
 **Scope:** replace per-operation native CLI process startup with one owned, persistent native
 process that serializes `status` and buffer-capture requests over JSON Lines (JSONL).
 **Evidence boundary:** B6 is currently retry-contained, not fixed. This design does not claim

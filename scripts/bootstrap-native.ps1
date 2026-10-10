@@ -15,7 +15,9 @@ $Commit = '5fc47744c18c99f9ad0f554a965eb8cd1160c836'
 # core/src/protocol.cpp (10-byte gated SimpleTrigger, DL16-TASK-010/011) and cli/main.cpp
 # (--trigger-position DL16-TASK-012, multi-channel AND DL16-TASK-014, --trigger-timeout 015).
 $Patch = Join-Path $RepoRoot 'scripts\patches\atk-dl16-local-build.patch'
+$SessionPatch = Join-Path $RepoRoot 'scripts\patches\atk-dl16-session.patch'
 if (-not (Test-Path $Patch)) { throw "Local patch missing: $Patch" }
+if (-not (Test-Path $SessionPatch)) { throw "Session patch missing: $SessionPatch" }
 
 if (-not (Test-Path $Dst)) {
   New-Item -ItemType Directory -Force (Split-Path $Dst) | Out-Null
@@ -38,6 +40,12 @@ if ($LASTEXITCODE -ne 0) { throw "Local patch does not apply cleanly to pinned c
 git -C $Dst apply $Patch
 if ($LASTEXITCODE -ne 0) { throw 'Failed to apply local patch' }
 Write-Host "[note] Applied local patch to ignored checkout: $(Split-Path $Patch -Leaf)"
+
+git -C $Dst apply --check $SessionPatch
+if ($LASTEXITCODE -ne 0) { throw "Session patch does not apply after the base patch: $SessionPatch" }
+git -C $Dst apply $SessionPatch
+if ($LASTEXITCODE -ne 0) { throw 'Failed to apply persistent-session patch' }
+Write-Host "[note] Applied persistent-session patch to ignored checkout: $(Split-Path $SessionPatch -Leaf)"
 
 if (-not $SkipBuild) {
   # Prefer the requested toolset only when it is actually installed on this machine;

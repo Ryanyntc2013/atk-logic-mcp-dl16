@@ -7,6 +7,8 @@ on:
       - 'scripts/bootstrap-native.ps1'
       - 'scripts/build-vector-harness.ps1'
       - 'scripts/patches/**'
+      - 'external/ATK-Logic-Mcp/cli/session_protocol.h'
+      - 'external/ATK-Logic-Mcp/tests/unit/test_main.cpp'
       - 'tests/native/**'
       - 'tests/protocol_reference.py'
       - 'tests/test_protocol_vectors.py'
@@ -34,6 +36,30 @@ jobs:
           if (-not (Test-Path $exe)) { throw "Expected binary missing: $exe" }
           & $exe
           if ($LASTEXITCODE -ne 0) { throw 'CLI smoke test failed' }
+      - name: Verify persistent JSONL hello/close contract without hardware
+        shell: pwsh
+        run: |
+          $exe = 'external/ATK-Logic-Mcp/build/Release/atk-dl16.exe'
+          $requests = @(
+            '{"request_id":"hello-1","command":"hello","protocol":1}',
+            '{"request_id":"hello-2","command":"hello","protocol":1}',
+            'malformed-json',
+            '{"request_id":"unknown-1","command":"not-supported"}',
+            '{"request_id":"invalid-capture","command":"capture","channels":[]}',
+            '{"request_id":"invalid-trigger","command":"capture","channels":[0],"sample_rate_hz":20000000,"duration_ms":10,"threshold_voltage":1.6,"trigger":"ch16:rising"}',
+            '{"request_id":"close-1","command":"close"}'
+          ) -join "`n"
+          $responses = $requests | & $exe session --jsonl
+          if ($LASTEXITCODE -ne 0) { throw 'JSONL session process failed' }
+          $parsed = @($responses | ForEach-Object { $_ | ConvertFrom-Json })
+          if ($parsed.Count -ne 7) { throw "Expected 7 JSONL responses, got $($parsed.Count)" }
+          if ($parsed[0].request_id -ne 'hello-1' -or $parsed[0].ok -ne $true -or $parsed[0].protocol -ne 1) { throw 'First hello contract failed' }
+          if ($parsed[1].request_id -ne 'hello-2' -or $parsed[1].ok -ne $true) { throw 'Second hello correlation failed' }
+          if ($parsed[2].ok -ne $false -or $parsed[2].error_code -ne 'INVALID_JSON') { throw 'Malformed JSON contract failed' }
+          if ($parsed[3].request_id -ne 'unknown-1' -or $parsed[3].error_code -ne 'UNKNOWN_COMMAND') { throw 'Unknown command contract failed' }
+          if ($parsed[4].request_id -ne 'invalid-capture' -or $parsed[4].error_code -ne 'INVALID_CAPTURE') { throw 'Invalid capture contract failed' }
+          if ($parsed[5].request_id -ne 'invalid-trigger' -or $parsed[5].error_code -ne 'INVALID_CAPTURE') { throw 'Invalid trigger must be rejected before opening USB' }
+          if ($parsed[6].request_id -ne 'close-1' -or $parsed[6].session -ne 'closing') { throw 'Close contract failed' }
       - name: Build offline C++/Python protocol cross-check harness
         shell: pwsh
         run: .\scripts\build-vector-harness.ps1 -Toolset auto

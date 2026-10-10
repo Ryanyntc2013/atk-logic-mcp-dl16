@@ -1,2 +1,3 @@
 # Patches applied to the pinned upstream checkout must keep exact bytes (no EOL conversion).
-scripts/patches/*.patch -text
+scripts/patches/*.patch -text whitespace=-blank-at-eol
+external/ATK-Logic-Mcp/cli/session_protocol.h -text
