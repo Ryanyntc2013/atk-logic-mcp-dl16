@@ -95,6 +95,20 @@ Risks: <known incompatibilities; what was not checked>
 Next: <single suggested DL16-TASK-003 scope>
 ```
 
+## Phase A status (2026-10-10, offline)
+
+Phase A is implemented and passing offline. Independent reference codec:
+`tests/protocol_reference.py`; versioned vectors: `tests/test_protocol_vectors.py`
+(28 tests). Full Python suite: **45 passed**. Discrepancy matrix and preserved
+divergences: `docs/research/DL16-TASK-002-phase-a-protocol-vectors.md`.
+
+- CRC, TX framing, 2048B bank transform, trigger nibble, parameter payload, RX
+  reassembly and RLE/tail vectors **AGREE** across documented sources.
+- 9B/10B trigger payload and 25/500 MHz index conflicts are **DIFF** and kept as
+  separate tables; nothing was silently merged.
+- Trigger gating / physical alignment remains **UNKNOWN / HIL_NOT_RUN** (Phase B).
+- No live backend behavior changed by this phase.
+
 ## Local invocation prompt (paste into Codex/Cursor)
 
 > Read `AGENTS.md`, `docs/tasks/DL16-TASK-002.md`, `docs/research/LHX369963-dl16-cli-cross-validation-2026-10-10.md`, `docs/HIL-TEST-PLAN.md`, and the current source/test tree. Execute Phase A autonomously with clean, numbered commits and objective evidence. Confirm what is already done for DL16-TASK-001; if hardware is unavailable or unverified, do **not** attempt live captures or driver/reset changes. After offline acceptance, pause at the explicit hardware gate and return the required report. Do not silently merge conflicting sample indices or 9/10-byte trigger formats. Clearly separate source review, synthetic tests and locally reproduced HIL.
