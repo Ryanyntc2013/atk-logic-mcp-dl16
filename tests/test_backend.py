@@ -101,3 +101,30 @@ def test_status_retries_once_on_device_info_open_error(monkeypatch, tmp_path):
         s = backend.status()
     assert s["connected"] is True
     assert calls["n"] == 2
+
+
+def test_capture_passes_trigger_position(monkeypatch, tmp_path):
+    _cli_file(monkeypatch, tmp_path)
+    captured = {}
+
+    class R:
+        returncode = 0
+        stdout = json.dumps({"success": True, "data_integrity": "COMPLETE",
+                             "capture_complete_received": True, "trigger_ack_received": True})
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return R()
+
+    with patch("dl16_mcp.backend.subprocess.run", side_effect=fake_run):
+        backend.capture(CaptureRequest(trigger="ch0:rising"), trigger_position_percent=50.0)
+    assert "--trigger-position" in captured["cmd"]
+    assert "50.0" in captured["cmd"]
+
+
+def test_capture_rejects_bad_trigger_position(monkeypatch, tmp_path):
+    _cli_file(monkeypatch, tmp_path)
+    r = backend.capture(CaptureRequest(), trigger_position_percent=150.0)
+    assert r["success"] is False
+    assert r["error_code"] == "INVALID_CAPTURE_CONFIG"

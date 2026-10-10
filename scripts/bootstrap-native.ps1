@@ -58,6 +58,23 @@ if ($ptext.Contains($OldTrig)) {
 }
 # -----------------------------------------------------------------------------------
 
+# --- Trigger position control (atk-logic-mcp-dl16, DL16-TASK-012) ------------------
+# Expose the pre-trigger position (default was hardcoded 10%). Adds --trigger-position
+# to the pinned CLI capture options. Edits only the IGNORED checkout.
+$CliMain = Join-Path $Dst 'cli\main.cpp'
+$OldOut = '} else if (arg == "--out" && i + 1 < argc) {'
+$ctext = [System.IO.File]::ReadAllText($CliMain)
+if ($ctext.Contains('--trigger-position')) {
+  Write-Host '[note] Trigger-position patch already present in ignored checkout.'
+} elseif ($ctext.Contains($OldOut)) {
+  $newOut = "} else if (arg == `"--trigger-position`" && i + 1 < argc) {`r`n                config.trigger.position_percent = std::stod(argv[++i]);`r`n            $OldOut"
+  [System.IO.File]::WriteAllText($CliMain, $ctext.Replace($OldOut, $newOut))
+  Write-Host '[note] Applied local --trigger-position patch to ignored checkout.'
+} else {
+  throw 'Pinned cli/main.cpp capture options not found; refusing to guess.'
+}
+# -----------------------------------------------------------------------------------
+
 if (-not $SkipBuild) {
   # Prefer the requested toolset only when it is actually installed on this machine;
   # otherwise fall back to the installed default (let CMake pick v143).

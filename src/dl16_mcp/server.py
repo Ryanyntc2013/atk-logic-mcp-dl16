@@ -16,13 +16,17 @@ def logic_status() -> dict:
 @mcp.tool()
 def logic_capture(channels: list[int] | None = None, sample_rate_hz: int = 20_000_000,
                   duration_ms: int = 20, threshold_voltage: float = 1.6,
-                  trigger: str = "immediate", timeout_s: float = 45.0) -> dict:
+                  trigger: str = "immediate", timeout_s: float = 45.0,
+                  trigger_position_percent: float | None = None) -> dict:
     """Capture to disk using native CLI. No simulated waveform ever returned as hardware.
 
-    Buffer mode only. Trigger physical effectiveness must still be verified by HIL.
+    Buffer mode only. Edge/level triggers gate on this firmware (10-byte payload).
+    trigger_position_percent sets the pre-trigger position (default device 10%). Physical
+    timing must still be verified by HIL.
     """
     return service.logic_capture(channels, sample_rate_hz, duration_ms,
-                                 threshold_voltage, trigger, timeout_s)
+                                 threshold_voltage, trigger, timeout_s,
+                                 trigger_position_percent)
 
 
 @mcp.tool()

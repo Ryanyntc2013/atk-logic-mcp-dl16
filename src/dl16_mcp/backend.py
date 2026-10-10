@@ -80,11 +80,14 @@ def _status_once(cli: Path) -> dict[str, Any]:
     return {"connected": False, "ready": False, "error_code": "DEVICE_OR_DRIVER_ERROR", "message": last_msg}
 
 
-def capture(request: CaptureRequest, timeout_s: float = 45.0) -> dict[str, Any]:
+def capture(request: CaptureRequest, timeout_s: float = 45.0,
+            trigger_position_percent: float | None = None) -> dict[str, Any]:
     try:
         request.validate()
         if not 1.0 <= timeout_s <= 3600:
             raise ValueError("timeout_s must be from 1 to 3600 seconds")
+        if trigger_position_percent is not None and not 0.0 <= trigger_position_percent <= 100.0:
+            raise ValueError("trigger_position_percent must be within [0, 100]")
     except (ValueError, TypeError) as exc:
         return {"success": False, "error_code": "INVALID_CAPTURE_CONFIG", "message": str(exc),
                 "data_integrity": "UNKNOWN", "evidence_source": "NONE"}
@@ -97,6 +100,8 @@ def capture(request: CaptureRequest, timeout_s: float = 45.0) -> dict[str, Any]:
            "--sample-rate", str(request.sample_rate_hz), "--duration", f"{request.duration_ms}ms",
            "--threshold", str(request.threshold_voltage), "--trigger", request.trigger,
            "--mode", request.mode, "--out", str(captures_dir()), "--json"]
+    if trigger_position_percent is not None:
+        cmd += ["--trigger-position", str(trigger_position_percent)]
     last_doc: dict[str, Any] | None = None
     for attempt in range(2):
         try:

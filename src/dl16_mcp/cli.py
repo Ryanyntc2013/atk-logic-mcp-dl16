@@ -14,6 +14,7 @@ def main() -> int:
     c.add_argument("--duration-ms", type=int, default=20)
     c.add_argument("--threshold", type=float, default=1.6)
     c.add_argument("--trigger", default="immediate")
+    c.add_argument("--trigger-position", type=float, default=None)
     s = cmd.add_parser("skew")
     s.add_argument("capture_id")
     s.add_argument("--ref", type=int, required=True)
@@ -42,7 +43,7 @@ def main() -> int:
     elif args.command == "capture":
         result = service.logic_capture([int(x.strip()) for x in args.channels.split(",")],
                                        args.sample_rate_hz, args.duration_ms, args.threshold,
-                                       args.trigger)
+                                       args.trigger, trigger_position_percent=args.trigger_position)
     elif args.command == "export":
         result = service.logic_export(args.capture_id, args.channel, args.fmt, args.polarity,
                                       overwrite=args.force)
