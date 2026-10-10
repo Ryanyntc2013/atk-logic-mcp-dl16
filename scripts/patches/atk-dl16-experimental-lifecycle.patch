@@ -1,0 +1,82 @@
+diff --git a/cli/main.cpp b/cli/main.cpp
+index 941f6ba..f33927e 100644
+--- a/cli/main.cpp
++++ b/cli/main.cpp
+@@ -13,2 +13,3 @@
+ #include <limits>
++#include <cstdlib>
+ 
+@@ -111,3 +112,6 @@ static int run_session_jsonl(){
+         }
+-        CaptureConfig cfg;int duration=0,timeout=30;double rate=0,threshold=1.6,position=cfg.trigger.position_percent;std::string trigger="immediate",out="captures";
++        CaptureConfig cfg;
++        const char* lifecycle=std::getenv("DL16_EXPERIMENTAL_SESSION_LIFECYCLE");
++        cfg.experimental_session_lifecycle=lifecycle && std::string(lifecycle)=="depth-stop-v1";
++        int duration=0,timeout=30;double rate=0,threshold=1.6,position=cfg.trigger.position_percent;std::string trigger="immediate",out="captures";
+         if(!session_channels(req,cfg.enabled_channels)||!session::get_integer(req,"duration_ms",duration)||duration<=0||!session_number(req,"sample_rate_hz",rate)||rate<=0||!session_number(req,"threshold_voltage",threshold)){std::cout<<session::error_response(id,"INVALID_CAPTURE","invalid required capture fields")<<std::flush;continue;}
+diff --git a/core/include/atkdl16/types.h b/core/include/atkdl16/types.h
+index e5939bb..61b6b9c 100644
+--- a/core/include/atkdl16/types.h
++++ b/core/include/atkdl16/types.h
+@@ -119,2 +119,3 @@ struct TriggerConfig {
+ struct CaptureConfig {
++    bool experimental_session_lifecycle{false};
+     CaptureMode mode{CaptureMode::Buffer};
+@@ -202,2 +203,16 @@ struct CaptureDiagnostics {
+ 
++inline bool experimental_depth_ready(bool ack, bool offset_received, bool complete,
++                                     const std::map<uint8_t, uint64_t>& samples,
++                                     const std::map<uint8_t, uint64_t>& offsets,
++                                     const std::vector<uint8_t>& channels, uint64_t target) {
++    if (!ack || !offset_received || !complete || channels.empty()) return false;
++    for (uint8_t ch : channels) {
++        auto sample = samples.find(ch); auto offset = offsets.find(ch);
++        uint64_t start = offset == offsets.end() ? 0 : offset->second;
++        if (sample == samples.end() || sample->second < start || sample->second - start < target)
++            return false;
++    }
++    return true;
++}
++
+ // Capture Summary Result
+diff --git a/core/src/capture.cpp b/core/src/capture.cpp
+index 0397dca..5049732 100644
+--- a/core/src/capture.cpp
++++ b/core/src/capture.cpp
+@@ -63,6 +63,19 @@ CaptureResult CaptureEngine::execute_capture(const CaptureConfig& config,
+ 
++    // Experimental session-only lifecycle; known Stop command, no reset/reopen.
++    struct StopCleanup {
++        Device& device; bool enabled;
++        ~StopCleanup() {
++            if (enabled && device.is_open()) {
++                auto frame = build_stop_frame();
++                device.transport().write_bulk(EP_BULK_OUT, frame.data(), frame.size(), 100);
++            }
++        }
++    } cleanup{m_device, config.experimental_session_lifecycle};
++
+     // 2. FLUSH_RX State
+     m_state = CaptureState::FlushRx;
+-    m_device.wake_fpga(result.diagnostics.enabled ? &result.diagnostics : nullptr);
+-    m_device.flush_buffers(result.diagnostics.enabled ? &result.diagnostics.explicit_flush : nullptr);
++    if (!config.experimental_session_lifecycle) {
++        m_device.wake_fpga(result.diagnostics.enabled ? &result.diagnostics : nullptr);
++        m_device.flush_buffers(result.diagnostics.enabled ? &result.diagnostics.explicit_flush : nullptr);
++    }
+ 
+@@ -222,3 +235,3 @@ CaptureResult CaptureEngine::execute_capture(const CaptureConfig& config,
+                     case RxMessageType::Complete: {
+-                        capture_complete = true;
++                        if (!config.experimental_session_lifecycle) capture_complete = true;
+                         result.capture_complete_received = true;
+@@ -231,2 +244,9 @@ CaptureResult CaptureEngine::execute_capture(const CaptureConfig& config,
+             }
++            if (config.experimental_session_lifecycle) {
++                std::map<uint8_t, uint64_t> observed;
++                for (uint8_t ch : config.enabled_channels) observed[ch] = store.sample_count(ch);
++                capture_complete = experimental_depth_ready(result.trigger_ack_received,
++                    received_trigger_offset, result.capture_complete_received, observed,
++                    channel_start_offsets, config.enabled_channels, target_samples);
++            }
+         }

@@ -68,6 +68,8 @@ jobs:
         run: |
           & 'tests/native/build/Release/dl16-diagnostics-test.exe'
           if ($LASTEXITCODE -ne 0) { throw 'Diagnostics seam failed' }
+          & 'tests/native/build/Release/dl16-experimental-lifecycle-test.exe'
+          if ($LASTEXITCODE -ne 0) { throw 'Experimental lifecycle criterion failed' }
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'

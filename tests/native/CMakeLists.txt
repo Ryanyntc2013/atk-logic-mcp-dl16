@@ -31,6 +31,9 @@ add_executable(dl16-diagnostics-test diagnostics_test.cpp)
 target_include_directories(dl16-diagnostics-test PRIVATE "${UP}/core/include")
 target_link_libraries(dl16-diagnostics-test PRIVATE "${UP}/build/Release/atkdl16_core.lib")
 
+add_executable(dl16-experimental-lifecycle-test experimental_lifecycle_test.cpp)
+target_include_directories(dl16-experimental-lifecycle-test PRIVATE "${UP}/core/include")
+
 # Bounded PWM output sender (DL16-TASK-004); drives approved loopback wiring only.
 add_executable(dl16-pwm pwm_tool.cpp)
 target_include_directories(dl16-pwm PRIVATE

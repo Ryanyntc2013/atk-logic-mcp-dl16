@@ -42,6 +42,10 @@ The diagnostics patch independently instruments the pinned CPP capture path and 
 
 The additive pre-arm patch observes the pinned CPP wake write and its existing internal flush, followed by the existing explicit capture flush. No upstream timing, limits, return behavior or protocol sequence was replaced. Flush timeout/empty results and error counters do not prove endpoint emptiness or packet generation ownership. Independent implementation and acceptance: [TASK-025](tasks/DL16-TASK-025-prearm-telemetry.md); no LHX source copied.
 
+## Experimental depth/stop lifecycle (DL16-TASK-027)
+
+Operator requested an independently implemented experiment based on documented LHX initialize-once, depth-based ordinary acquisition and final-stop principles. The native opt-in is not a port or compatibility claim: pinned framing/crop/marker requirements remain, no LHX source was copied/translated, and local physical validation is pending. See [TASK-027](tasks/DL16-TASK-027-experimental-depth-stop.md). Sufficient bytes/markers do not establish acquisition generation ownership.
+
 ## License hygiene
 
 - Keep provenance, git commit IDs and third-party NOTICE when embedding source in the future.

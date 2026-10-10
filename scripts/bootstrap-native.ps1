@@ -61,6 +61,11 @@ git -C $Dst apply --check $PrearmPatch
 if ($LASTEXITCODE -ne 0) { throw 'Prearm telemetry patch check failed' }
 git -C $Dst apply $PrearmPatch
 if ($LASTEXITCODE -ne 0) { throw 'Prearm telemetry patch apply failed' }
+$LifecyclePatch = Join-Path $RepoRoot 'scripts\patches\atk-dl16-experimental-lifecycle.patch'
+git -C $Dst apply --check $LifecyclePatch
+if ($LASTEXITCODE -ne 0) { throw 'Experimental lifecycle patch check failed' }
+git -C $Dst apply $LifecyclePatch
+if ($LASTEXITCODE -ne 0) { throw 'Experimental lifecycle patch apply failed' }
 
 if (-not $SkipBuild) {
   # Prefer the requested toolset only when it is actually installed on this machine;
