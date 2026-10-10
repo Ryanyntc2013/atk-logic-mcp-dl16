@@ -1,6 +1,6 @@
 # DL16-TASK-018 — persistent native JSONL session design
 
-**Status:** TASK-018-A and 018-B implemented locally; first 018-C attempt failed on nested capture JSON framing. Fix is in progress; a new bounded HIL attempt is required.
+**Status:** TASK-018-A/B implemented; 018-C ran and failed persistent-session capture acceptance. One-shot comparison passed 20/20. Keep one-shot as default and retain B6 retry; session lifecycle requires further investigation.
 **Scope:** replace per-operation native CLI process startup with one owned, persistent native
 process that serializes `status` and buffer-capture requests over JSON Lines (JSONL).
 **Evidence boundary:** B6 is currently retry-contained, not fixed. This design does not claim
@@ -185,20 +185,27 @@ prove all capture modes, all firmware versions, or a general B6 fix.
   replays capture requests.
 - `DL16_BACKEND_MODE=session` opts into session routing for status/capture. Default remains
   `oneshot`; failures do not silently fall back. Process shutdown closes the owned worker.
-- First operator-approved 018-C attempt used PWM0->CH8 and PWM1->CH14. The second-worker
-  ownership probe correctly returned `DEVICE_OPEN_FAILED` indicating the port was claimed.
-  The first persistent capture then completed on-device and wrote
-  `cap_1791641573277_8694`, but the Python parent rejected the outer JSONL response because
-  the embedded multiline capture JSON had not been compacted/escaped. The block stopped
-  immediately: no capture replay and no one-shot comparison. Read-only follow-up status was
-  connected/ready. Evidence and its SHA256 manifest are in ignored
-  `artifacts/hil/DL16-TASK-018/`.
-- A fix was added to compact nested native JSON outside quoted string contents; native
-  regression coverage and Python protocol diagnostics are being rerun before any new HIL.
+- LOCAL_HIL after wiring confirmation PWM0->CH8/PWM1->CH14, frequencies 100/1007 Hz, both
+  50%, capture CH8+CH14 at 20 MHz / 10 ms. The second-worker ownership probe returned
+  `DEVICE_OPEN_FAILED` with port-claimed text and exited without stealing the active handle.
+- First HIL block exposed a real serialization defect: the on-device capture completed and
+  wrote `cap_1791641573277_8694`, but multiline nested capture JSON made the outer JSONL
+  response invalid. No replay was performed. JSON-aware whitespace compaction was added,
+  covered by native unit tests, and verified in a real session smoke capture.
+- The repeated persistent-session block then stopped at run 2: run 1 succeeded
+  (`cap_1791642349999_9388`); run 2 returned `INCOMPLETE_CAPTURE`, with Complete observed but
+  every enabled channel at 0/200000 samples. The request was not retried. The session block
+  therefore FAILED its acceptance criteria.
+- Separate one-shot comparison: 20/20 captures COMPLETE with 200000 samples on CH8 and CH14.
+  The legacy narrow B6 retry was visible on 16/20; all recovered on attempt 2. Four were
+  first-attempt successes. All 21 one-shot artifacts (smoke + 20) have complete metadata.
+- Read-only final status was connected/ready. Both PWM outputs were stopped. Evidence and
+  SHA256 manifest are under ignored `artifacts/hil/DL16-TASK-018/`.
 - Verification on Windows: `bootstrap-native.ps1` (clean reset + ordered patches) succeeded;
   native suite 32/32; JSONL 6-request hello/malformed/unknown/invalid-capture/invalid-trigger/
   close smoke passed. Python suite 107 passed; compileall and diff checks passed.
-- Current confirmed wiring is PWM0->CH8 and PWM1->CH14; the test does not require changing
-  wiring to CH0. The first session capture exposed a response framing defect. Session HIL
-  acceptance and the 20-capture one-shot comparison remain open until the fix is verified
-  offline and a new bounded block is explicitly run.
+- Current confirmed wiring is PWM0->CH8 and PWM1->CH14; no wiring change was needed. Session
+  is NOT accepted as a capture backend. Keep `DL16_BACKEND_MODE=oneshot` as default and keep
+  the B6 retry. Next step is offline investigation of post-capture sample-store/session
+  lifecycle and a deterministic native regression reproducing the zero-sample Complete
+  result; any subsequent HIL needs a fresh bounded approval and must stop on first failure.

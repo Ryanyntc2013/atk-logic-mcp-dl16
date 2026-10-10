@@ -73,6 +73,26 @@ PWM0->CH8, PWM1->CH14 verified 1 kHz/2 kHz.)
   non-harmonic PWM. The earlier 100 Hz/1 kHz timeouts were a phase artifact.
 - Evidence: `artifacts/hil/DL16-TASK-017/` (ignored) with SHA256SUMS.txt. PWM outputs were stopped; device ready after.
 
+## DL16-TASK-018-C (persistent-session comparison; acceptance FAILED)
+
+- Wiring: PWM0->CH8, PWM1->CH14; 100 Hz and 1007 Hz, 50% duty. Capture: CH8+CH14,
+  20 MHz, 10 ms (200,000 samples/channel), immediate trigger. GUI was not running.
+- Ownership probe: a second session received `DEVICE_OPEN_FAILED` with port-claimed text;
+  it closed without disturbing the owner.
+- Initial session response framing defect was fixed offline (nested multiline capture JSON
+  must be compacted before embedding). First session capture artifact was written, but its
+  parent call failed with `SESSION_PROTOCOL_ERROR`; it is retained as a failed protocol attempt.
+- After the fix, session run 1 completed. Session run 2 returned `INCOMPLETE_CAPTURE` with
+  Complete present but all enabled channels 0/200,000. The block stopped immediately, no
+  retry/replay; persistent-session acceptance FAILED.
+- One-shot comparison: 20/20 COMPLETE, 200,000 samples on CH8 and CH14. 16/20 used the
+  bounded B6 retry (first open-after-capture FPGA device-info parse failure), 4/20 succeeded
+  on attempt 1. All artifacts passed metadata checks. Final device status connected/ready.
+- Evidence: `artifacts/hil/DL16-TASK-018/` with 435-file SHA256 manifest. PWM outputs stopped.
+- Operational decision: keep one-shot as default and retain B6 retry. Do not use session mode
+  for captures until the zero-sample Complete path is reproduced and fixed offline, then
+  separately revalidated in a newly approved HIL block.
+
 ## Build patches applied to the ignored checkout (reproducible)
 
 All local native changes are one patch: scripts/patches/atk-dl16-local-build.patch, applied
