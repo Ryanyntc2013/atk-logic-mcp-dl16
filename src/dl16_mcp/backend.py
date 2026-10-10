@@ -11,9 +11,15 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import time
 from typing import Any
 
 from .config import CaptureRequest, captures_dir
+
+# Total attempts (first try + retries) for the retryable post-capture open failure.
+MAX_ATTEMPTS = 3
+# Injectable sleep so offline tests do not wait on real backoff.
+_sleep = time.sleep
 
 
 class BackendError(RuntimeError):
@@ -56,28 +62,40 @@ def status() -> dict[str, Any]:
     return _status_once(cli)
 
 
+def _backoff_seconds(attempt: int) -> float:
+    """Linear backoff after the given 1-based failed attempt (0.5 s, 1.0 s, ...)."""
+    return 0.5 * attempt
+
+
 def _status_once(cli: Path) -> dict[str, Any]:
     last_msg = ""
-    for attempt in range(2):
+    retry_log: list[dict[str, Any]] = []
+    attempt = 0
+    for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
             r = subprocess.run([str(cli), "info"], capture_output=True, text=True, timeout=10, check=False)
         except (OSError, subprocess.TimeoutExpired) as exc:
-            return {"connected": False, "ready": False, "error_code": "CLI_ERROR", "message": str(exc)}
+            return {"connected": False, "ready": False, "error_code": "CLI_ERROR", "message": str(exc),
+                    "attempts": attempt, "retry_log": retry_log}
         if r.returncode == 0:
             fields = {}
             for line in r.stdout.splitlines():
                 if ":" in line:
                     key, value = line.split(":", 1)
                     fields[re.sub(r"\s+", "_", key.strip().lower())] = value.strip()
-            return {"connected": True, "ready": True, "cli_path": str(cli), "details": fields}
+            return {"connected": True, "ready": True, "cli_path": str(cli), "details": fields,
+                    "attempts": attempt, "retry_log": retry_log}
         last_msg = (r.stderr or r.stdout).strip()[-1500:]
         # The pinned backend's FPGA device-info query deterministically fails once
-        # immediately after a completed capture (see DL16-TASK-002 B6). One retry of
-        # the read-only CLI invocation recovers; this is not a USB reset.
-        if attempt == 0 and _is_retryable_open_error(last_msg):
+        # immediately after a completed capture (see DL16-TASK-002 B6). Retrying the
+        # read-only CLI invocation recovers; this is not a USB reset.
+        if attempt < MAX_ATTEMPTS and _is_retryable_open_error(last_msg):
+            retry_log.append({"attempt": attempt, "error": last_msg[-200:]})
+            _sleep(_backoff_seconds(attempt))
             continue
         break
-    return {"connected": False, "ready": False, "error_code": "DEVICE_OR_DRIVER_ERROR", "message": last_msg}
+    return {"connected": False, "ready": False, "error_code": "DEVICE_OR_DRIVER_ERROR", "message": last_msg,
+            "attempts": attempt, "retry_log": retry_log}
 
 
 def capture(request: CaptureRequest, timeout_s: float = 45.0,
@@ -108,7 +126,8 @@ def capture(request: CaptureRequest, timeout_s: float = 45.0,
     if trigger_timeout_sec is not None:
         cmd += ["--trigger-timeout", str(trigger_timeout_sec)]
     last_doc: dict[str, Any] | None = None
-    for attempt in range(2):
+    retry_log: list[dict[str, Any]] = []
+    for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
             # Upstream CLI runs a fixed 30 s device watchdog; process timeout is separate.
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s, check=False)
@@ -133,13 +152,26 @@ def capture(request: CaptureRequest, timeout_s: float = 45.0,
             doc["success"] = False
             doc["error_code"] = "EVIDENCE_INCOMPLETE"
             doc["message"] = "Capture finished without required integrity markers"
-        # Retry once only for the deterministic post-capture device-info open failure
+        # Retry only the deterministic post-capture device-info open failure
         # (DL16-TASK-002 B6); never retry a timeout or an incomplete evidence result.
-        if not doc.get("success") and attempt == 0 and _is_retryable_open_error(str(doc.get("message", ""))):
+        if (not doc.get("success") and attempt < MAX_ATTEMPTS
+                and _is_retryable_open_error(str(doc.get("message", "")))):
+            retry_log.append({"attempt": attempt, "error_code": doc.get("error_code"),
+                              "message": str(doc.get("message", ""))[-200:]})
             last_doc = doc
+            _sleep(_backoff_seconds(attempt))
             continue
         doc["backend"] = "native-cli"
+        doc["attempts"] = attempt
+        doc["retry_log"] = retry_log
+        if retry_log:
+            doc.setdefault("warnings", []).append(
+                f"open-retry: {len(retry_log)} retried attempt(s) after post-capture device-info failure")
         return doc
     assert last_doc is not None
     last_doc["backend"] = "native-cli"
+    last_doc["attempts"] = MAX_ATTEMPTS
+    last_doc["retry_log"] = retry_log
+    last_doc.setdefault("warnings", []).append(
+        f"open-retry exhausted after {MAX_ATTEMPTS} attempts")
     return last_doc
