@@ -36,4 +36,6 @@ state that fails once.
 ## Status
 
 - B6: `LOCAL_HIL` — raw reliability 50 %; retry-contained.
+- After adding a bounded retry to `backend.py` (commit `5901137`), a re-run of the
+  same 20-capture loop gave **20/20** successes (failures 0).
 - No USB reset, driver change or power cycle used (AGENTS.md honored).
