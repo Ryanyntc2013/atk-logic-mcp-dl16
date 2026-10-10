@@ -108,6 +108,10 @@ A separate postflight `info` failed with `Invalid MCU version header` and a 512-
 
 Evidence now includes full durable request/response JSONL and per-step records under ignored `artifacts/hil/DL16-TASK-021/`, not raw USB RX. See [TASK-021 report](tasks/DL16-TASK-021-corrected-session-smoke.md). Keep one-shot default and B6 retry; next gate is bounded native receive diagnostics, not a repeatability block.
 
+## DL16-TASK-023 — restored-device receive diagnostics (FAILED)
+
+Operator restored the device; fresh readiness passed. With TASK-022 diagnostic CLI, first corrected CH8/CH14 capture passed. Second received exactly one aligned 16,384-byte read, message orders `[6,6,6,4,5,5,5,5]`, no channel-data messages, zero samples before and after crop. Stop-on-failure worked; no third request or reset. This rules out crop clearing for this run and prioritizes completion-message ownership/lifecycle investigation, but does not prove the Complete messages came from the prior acquisition. Full report and evidence mapping: [TASK-023](tasks/DL16-TASK-023-session-complete-order-hil.md). Session remains unaccepted; one-shot default and B6 retry retained.
+
 ## Build patches applied to the ignored checkout (reproducible)
 
 All local native changes are one patch: scripts/patches/atk-dl16-local-build.patch, applied
