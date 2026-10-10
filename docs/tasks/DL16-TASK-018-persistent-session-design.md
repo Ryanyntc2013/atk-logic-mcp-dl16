@@ -123,21 +123,28 @@ protocol error; it must never be treated as a partial capture request.
 
 ### 018-C — bounded LOCAL_HIL comparative validation
 
-Run only when the operator confirms the device is connected, known-safe wiring is present,
-and the ATK-Logic GUI is closed. Use one channel, known PWM loopback, 20 MHz, 10 ms, and
+Run only when the operator confirms the device is connected, the known wiring is present,
+and the ATK-Logic GUI is closed. Current confirmed wiring is PWM0 -> CH8 and PWM1 -> CH14;
+do not require or assume a CH0 loopback. Use these two channels at 20 MHz, 10 ms, and
 complete status checks before and after each block. Save evidence under
 `artifacts/hil/DL16-TASK-018/` with the evidence-manifest script.
 
-1. Verify session startup/hello/status and that the USB ownership lock blocks a second
-   session without disturbing the first.
-2. Run 20 sequential captures in one persistent session. Record every request ID, result,
+1. With the confirmed PWM0->CH8/PWM1->CH14 loopbacks, configure PWM0 at 100 Hz and PWM1 at
+   1007 Hz, both 50% duty. Capture channels 8 and 14 at 20 MHz for 10 ms with immediate
+   trigger. This is a bounded 200,000 samples/channel per capture; default 4-channel safety
+   cap remains in force.
+2. Verify session startup/hello/status. If comparing USB exclusivity, a second worker may
+   be launched only as a probe and must receive `DEVICE_BUSY`; do not terminate or disturb
+   the owning session.
+3. Run 20 sequential captures in one persistent session. Record every request ID, result,
    latency, retry/log state, artifact completeness, process PID, and session state.
-3. Run a separate 20-capture one-shot comparison with the same configuration if device state
-   remains healthy. This separates session effects from ordinary trial variation.
-4. Pass criteria: 20/20 complete captures within the persistent session; no child restart,
+4. If device state remains healthy, stop/restart only the approved PWM outputs as needed,
+   then run a separate 20-capture one-shot comparison with the exact same channels, rates,
+   duration and trigger. Status-check between blocks.
+5. Pass criteria: 20/20 complete captures within the persistent session; no child restart,
    request/response mismatch, data-integrity downgrade, or silent retry; status remains
    transport-open between captures. Any failure is retained as evidence and stops the block.
-5. Only if persistent-session HIL passes and the comparison supports it, propose a later
+6. Only if persistent-session HIL passes and the comparison supports it, propose a later
    change to retire the B6 retry. Do not remove the retry in TASK-018-A/B based on theory.
 
 The 20/20 criterion validates this device/firmware and test configuration only. It does not
@@ -181,5 +188,7 @@ prove all capture modes, all firmware versions, or a general B6 fix.
 - Verification on Windows: `bootstrap-native.ps1` (clean reset + ordered patches) succeeded;
   native suite 32/32; JSONL 6-request hello/malformed/unknown/invalid-capture/invalid-trigger/
   close smoke passed. Python suite 107 passed; compileall and diff checks passed.
-- No hardware was accessed. Session `status` and `capture` HIL, child ownership against a
-  second process, and 20-capture comparison remain in 018-C.
+- Confirmed wiring for the planned HIL was updated to PWM0->CH8 and PWM1->CH14; the test no
+  longer depends on changing the wiring to CH0. The operator is currently away from the
+  hardware, so no device access occurred. Session `status`/capture HIL, child ownership
+  against a second process, and the 20-capture comparison remain in 018-C.
