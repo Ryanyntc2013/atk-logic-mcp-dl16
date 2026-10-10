@@ -37,3 +37,15 @@ target_link_libraries(dl16-pwm PRIVATE
     "${UP}/third_party/libusb/VS2022/MS64/dll/libusb-1.0.lib"
     Advapi32
 )
+
+# Bounded SimpleTrigger gating probe (DL16-TASK-010); operator-approved experiment.
+add_executable(dl16-trigger trigger_tool.cpp)
+target_include_directories(dl16-trigger PRIVATE
+    "${UP}/core/include"
+    "${UP}/third_party/libusb/include"
+)
+target_link_libraries(dl16-trigger PRIVATE
+    "${UP}/build/Release/atkdl16_core.lib"
+    "${UP}/third_party/libusb/VS2022/MS64/dll/libusb-1.0.lib"
+    Advapi32
+)

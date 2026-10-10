@@ -33,9 +33,10 @@ waiting, i.e. simple-trigger edge gating was **not observed**.
 
 ## Status
 
-- B3: `LOCAL_HIL observation` / gating `UNVERIFIED` (not observed).
+- B3: `LOCAL_HIL observation` / gating `UNVERIFIED` for the 9-byte payload.
+- **Resolved by [DL16-TASK-010](DL16-TASK-010-simple-trigger-gating-9b-vs-10b.md):**
+  the 10-byte SimpleTrigger payload gates (edge and level); the 9-byte does not.
 - No live trigger encoding was modified.
-- Follow-up (operator-approved): compare 9B vs 10B gating on the same loopback.
 
 ## Cross-references
 

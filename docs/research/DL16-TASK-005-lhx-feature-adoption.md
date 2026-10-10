@@ -13,7 +13,7 @@ discipline unchanged.
 | `pwm start/stop` + `pwm verify` (fixed PWM0->input loopback) | high | codec + `dl16-pwm` tool; live LOCAL_HIL | **ADOPTED** (verify workflow still manual) |
 | Persistent JSONL `session` (pwm/capture/stream over one USB link) | high — avoids per-command reinit | not present; B6 retry mitigates the post-capture open failure | **DEFER** (needs a native persistent process) |
 | `capture stream` (incremental, interruptible, rate limits) | high | buffer only | **DEFER** (native backend) |
-| Trigger position (`--trigger-position`), `--trigger-timeout`, multi-channel `--trigger-states` | high | only `chN:edge`; position hardcoded 10%; gating not functional (B3) | **DEFER / investigate** (native param) |
+| Trigger position (`--trigger-position`), `--trigger-timeout`, multi-channel `--trigger-states` | high | position hardcoded 10%; gating via 9B not functional (B3) | **INVESTIGATED**: 10B payload gates, 9B does not (DL16-TASK-010); tracked patch pending |
 | Hardware RLE | medium | not enabled | **DEFER** |
 | `capture measure` (frequency/duty) | high | `logic_measure_pwm` | **ADOPTED** |
 | `capture filter` (drop short pulses -> new capture) | medium | **`logic_filter` added now** | **ADOPTED** |

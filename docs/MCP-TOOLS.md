@@ -35,6 +35,7 @@ REAL_HARDWARE sources stay distinct.
 - `atk-dl16.exe` — pinned capture CLI (used by `logic_capture`/`logic_status`).
 - `dl16-vector-dump.exe` — offline CPP<->Python protocol cross-check.
 - `dl16-pwm.exe` — bounded PWM0/PWM1 start/stop sender (`0x17`), operator-gated.
+- `dl16-trigger.exe` — bounded SimpleTrigger gating probe (9B/10B payload), operator-gated.
 
 PWM output is **deliberately not an MCP tool**: it drives pins and stays a reviewed,
 operator-invoked helper. No `send_raw`, firmware, bootloader or driver tool exists.
