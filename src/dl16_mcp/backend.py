@@ -12,9 +12,11 @@ import re
 import shutil
 import subprocess
 import time
+import threading
 from typing import Any
 
 from .config import CaptureRequest, captures_dir
+from .session import NativeSession, SessionFailure, register_for_shutdown
 
 # Total attempts (first try + retries) for the retryable post-capture open failure.
 MAX_ATTEMPTS = 3
@@ -48,6 +50,44 @@ def find_native_cli() -> Path | None:
 # packet (short/non-2048B reply); on this firmware it fails deterministically the
 # first open after a completed capture (DL16-TASK-002 B6) and succeeds on retry.
 _RETRYABLE_OPEN_FRAGMENT = "failed to parse fpga device info"
+_SESSION_LOCK = threading.Lock()
+_SESSION: NativeSession | None = None
+_SESSION_PATH: Path | None = None
+
+
+def _session_enabled() -> bool:
+    return os.environ.get("DL16_BACKEND_MODE", "oneshot").strip().lower() == "session"
+
+
+def _get_session(cli: Path) -> NativeSession:
+    global _SESSION, _SESSION_PATH
+    with _SESSION_LOCK:
+        if _SESSION is not None and _SESSION_PATH == cli:
+            return _SESSION
+        if _SESSION is not None:
+            _SESSION.close()
+        _SESSION = NativeSession(cli)
+        _SESSION_PATH = cli
+        register_for_shutdown(_SESSION)
+        return _SESSION
+
+
+def _session_status(cli: Path) -> dict[str, Any]:
+    try:
+        response = _get_session(cli).request({"command": "status"}, timeout_s=10.0)
+        device = response.get("device", {})
+        return {"connected": True, "ready": response.get("session") == "ready",
+                "backend": "native-session", "cli_path": str(cli),
+                "transport_open": response.get("transport_open") is True,
+                "details": {"model": device.get("model"),
+                            "hardware_level": device.get("hardware_level"),
+                            "usb_link_speed": device.get("usb_speed"),
+                            "mcu_firmware": device.get("mcu_firmware"),
+                            "fpga_firmware": device.get("fpga_firmware"),
+                            "channels": device.get("channels")}}
+    except SessionFailure as exc:
+        return {"connected": False, "ready": False, "backend": "native-session",
+                "error_code": exc.code, "message": str(exc)}
 
 
 def _is_retryable_open_error(message: str) -> bool:
@@ -59,6 +99,8 @@ def status() -> dict[str, Any]:
     if cli is None:
         return {"connected": False, "ready": False, "error_code": "CLI_MISSING",
                 "message": "Run scripts/bootstrap-native.ps1 and set DL16_CLI_PATH if needed"}
+    if _session_enabled():
+        return _session_status(cli)
     return _status_once(cli)
 
 
@@ -117,6 +159,37 @@ def capture(request: CaptureRequest, timeout_s: float = 45.0,
     if cli is None:
         return {"success": False, "error_code": "CLI_MISSING", "evidence_source": "NONE",
                 "data_integrity": "UNKNOWN", "message": "Native binary is not installed"}
+    if _session_enabled():
+        try:
+            response = _get_session(cli).request({
+                "command": "capture",
+                "channels": list(request.channels),
+                "sample_rate_hz": request.sample_rate_hz,
+                "duration_ms": request.duration_ms,
+                "threshold_voltage": request.threshold_voltage,
+                "trigger": request.trigger,
+                "trigger_position_percent": (trigger_position_percent if trigger_position_percent is not None else 10.0),
+                "trigger_timeout_sec": (trigger_timeout_sec if trigger_timeout_sec is not None else 30),
+                "output_dir": str(captures_dir()),
+            }, timeout_s=timeout_s)
+            doc = response.get("result")
+            if not isinstance(doc, dict):
+                raise SessionFailure("SESSION_PROTOCOL_ERROR", "capture response missing result object")
+            if doc.get("success") and (doc.get("data_integrity") != "COMPLETE" or
+                                        not doc.get("capture_complete_received") or
+                                        not doc.get("trigger_ack_received")):
+                doc["success"] = False
+                doc["error_code"] = "EVIDENCE_INCOMPLETE"
+                doc["message"] = "Capture finished without required integrity markers"
+            doc["backend"] = "native-session"
+            doc["attempts"] = 1
+            doc["retry_log"] = []
+            doc["warnings"] = list(doc.get("warnings") or [])
+            return doc
+        except SessionFailure as exc:
+            return {"success": False, "error_code": exc.code, "message": str(exc),
+                    "data_integrity": "UNKNOWN", "evidence_source": "NONE",
+                    "backend": "native-session", "attempts": 1, "retry_log": []}
     cmd = [str(cli), "capture", "--channels", ",".join(map(str, request.channels)),
            "--sample-rate", str(request.sample_rate_hz), "--duration", f"{request.duration_ms}ms",
            "--threshold", str(request.threshold_voltage), "--trigger", request.trigger,

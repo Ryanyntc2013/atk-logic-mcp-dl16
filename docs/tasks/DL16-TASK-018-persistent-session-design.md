@@ -1,6 +1,6 @@
 # DL16-TASK-018 — persistent native JSONL session design
 
-**Status:** TASK-018-A native JSONL worker implemented locally; Python process owner and HIL not started.
+**Status:** TASK-018-A and 018-B implemented locally; 018-C LOCAL_HIL not run.
 **Scope:** replace per-operation native CLI process startup with one owned, persistent native
 process that serializes `status` and buffer-capture requests over JSON Lines (JSONL).
 **Evidence boundary:** B6 is currently retry-contained, not fixed. This design does not claim
@@ -165,6 +165,21 @@ prove all capture modes, all firmware versions, or a general B6 fix.
 
 ## Current task status
 
-Design only. No native source, Python runtime, patch, or hardware state was changed by this
-document. Implementation is the next authorized phase after review of the design and its
-acceptance gates.
+### Completed offline implementation
+
+- Native worker: tracked `scripts/patches/atk-dl16-session.patch`; `bootstrap-native.ps1`
+  applies it after the base local patch with `git apply --check`. JSONL protocol version 1
+  supports hello/status/capture/close, serial dispatch, bounded lines, request IDs, strict
+  object parsing, and typed malformed/unknown/invalid-request responses.
+- Native parser and CLI contract tests are part of the pinned synthetic suite: 32/32 pass.
+- Python `NativeSession` owns one child process, uses one reader thread and serialized
+  request lock, verifies request IDs, and invalidates/terminates the owned child on timeout,
+  EOF, malformed response, oversized line, or correlation failure. It never retries or
+  replays capture requests.
+- `DL16_BACKEND_MODE=session` opts into session routing for status/capture. Default remains
+  `oneshot`; failures do not silently fall back. Process shutdown closes the owned worker.
+- Verification on Windows: `bootstrap-native.ps1` (clean reset + ordered patches) succeeded;
+  native suite 32/32; JSONL 6-request hello/malformed/unknown/invalid-capture/invalid-trigger/
+  close smoke passed. Python suite 107 passed; compileall and diff checks passed.
+- No hardware was accessed. Session `status` and `capture` HIL, child ownership against a
+  second process, and 20-capture comparison remain in 018-C.

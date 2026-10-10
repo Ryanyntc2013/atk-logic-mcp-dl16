@@ -216,3 +216,50 @@ def test_capture_timeout_never_retried(monkeypatch, tmp_path):
         r = backend.capture(CaptureRequest(), timeout_s=1.0)
     assert run.call_count == 1
     assert r["error_code"] == "HOST_TIMEOUT"
+
+
+def test_session_mode_routes_status_and_capture_without_oneshot(monkeypatch, tmp_path):
+    _cli_file(monkeypatch, tmp_path)
+    monkeypatch.setenv("DL16_BACKEND_MODE", "session")
+    calls = []
+
+    class FakeSession:
+        def request(self, request, *, timeout_s):
+            calls.append((request, timeout_s))
+            if request["command"] == "status":
+                return {"request_id": "s1", "ok": True, "session": "ready",
+                        "transport_open": True, "device": {"model": "DL16 Plus", "channels": 16}}
+            return {"request_id": "s2", "ok": True, "session": "ready",
+                    "result": {"success": True, "data_integrity": "COMPLETE",
+                               "capture_complete_received": True, "trigger_ack_received": True}}
+
+    fake = FakeSession()
+    monkeypatch.setattr(backend, "_get_session", lambda cli: fake)
+    with patch("dl16_mcp.backend.subprocess.run", side_effect=AssertionError("one-shot path must not run")):
+        status = backend.status()
+        capture = backend.capture(CaptureRequest(channels=(0,), trigger="ch0:rising"), trigger_timeout_sec=3)
+    assert status["backend"] == "native-session" and status["ready"] is True
+    assert capture["backend"] == "native-session" and capture["success"] is True
+    request = calls[1][0]
+    assert request["trigger_timeout_sec"] == 3
+    assert request["channels"] == [0]
+
+
+def test_session_failure_never_falls_back_or_replays(monkeypatch, tmp_path):
+    from dl16_mcp.session import SessionFailure
+    _cli_file(monkeypatch, tmp_path)
+    monkeypatch.setenv("DL16_BACKEND_MODE", "session")
+
+    class FailedSession:
+        calls = 0
+        def request(self, request, *, timeout_s):
+            self.calls += 1
+            raise SessionFailure("SESSION_TIMEOUT", "response timed out")
+
+    fake = FailedSession()
+    monkeypatch.setattr(backend, "_get_session", lambda cli: fake)
+    with patch("dl16_mcp.backend.subprocess.run", side_effect=AssertionError("must not fallback")) as run:
+        result = backend.capture(CaptureRequest())
+    assert result["error_code"] == "SESSION_TIMEOUT"
+    assert fake.calls == 1
+    assert run.call_count == 0
