@@ -10,6 +10,13 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $Dst = Join-Path $RepoRoot 'external\ATK-Logic-Mcp'
 $Commit = '5fc47744c18c99f9ad0f554a965eb8cd1160c836'
+# All local build compatibility/feature changes live in ONE reviewable patch file applied on
+# top of the pinned commit. It touches CMakeLists.txt (libusb import library, C1900 fix),
+# core/src/protocol.cpp (10-byte gated SimpleTrigger, DL16-TASK-010/011) and cli/main.cpp
+# (--trigger-position DL16-TASK-012, multi-channel AND DL16-TASK-014, --trigger-timeout 015).
+$Patch = Join-Path $RepoRoot 'scripts\patches\atk-dl16-local-build.patch'
+if (-not (Test-Path $Patch)) { throw "Local patch missing: $Patch" }
+
 if (-not (Test-Path $Dst)) {
   New-Item -ItemType Directory -Force (Split-Path $Dst) | Out-Null
   git clone https://github.com/gjjisadog/ATK-Logic-Mcp.git $Dst
@@ -20,139 +27,17 @@ if ($LASTEXITCODE -ne 0) { throw 'Failed to fetch pinned commit' }
 git -C $Dst checkout --detach $Commit
 if ($LASTEXITCODE -ne 0) { throw 'Failed to checkout pinned commit' }
 
-# --- Local build compatibility fix (atk-logic-mcp-dl16) ---------------------------
-# The pinned upstream links a prebuilt libusb STATIC library that carries /GL (LTCG)
-# intermediate code produced by a NEWER MSVC front-end (19.39+). Toolchains older than
-# that front-end (e.g. local VS2022 14.36 or VS2019 14.29 under VS2022) fail to link it
-# with "LINK : fatal error C1900: Il mismatch" regardless of the selected toolset.
-# We therefore link libusb through its DLL import library and stage libusb-1.0.dll next
-# to the executables. This edits only the IGNORED checkout; the pinned commit content is
-# never claimed to be modified. See docs/LOCAL-HANDOFF.md and docs/STATUS.md.
-$CmakeLists = Join-Path $Dst 'CMakeLists.txt'
-$StaticLibRef = 'VS2022/MS64/static/libusb-1.0.lib'
-$ImportLibRef = 'VS2022/MS64/dll/libusb-1.0.lib'
-$text = [System.IO.File]::ReadAllText($CmakeLists)
-if ($text.Contains($StaticLibRef)) {
-  $text = $text.Replace($StaticLibRef, $ImportLibRef)
-  [System.IO.File]::WriteAllText($CmakeLists, $text)
-  Write-Host '[note] Applied local libusb static->import-library build fix to ignored checkout.'
-} elseif (-not $text.Contains($ImportLibRef)) {
-  throw 'Pinned CMakeLists.txt has an unexpected libusb layout; refusing to guess.'
-}
-# -----------------------------------------------------------------------------------
+# `checkout --detach` keeps local modifications, so force the ignored checkout back to the
+# pinned tree before applying the patch. This makes the result reproducible from clean state.
+# Only the IGNORED external checkout is reset; no upstream history is rewritten.
+git -C $Dst reset --hard $Commit | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Failed to reset ignored checkout to pinned commit' }
 
-# --- SimpleTrigger gating fix (atk-logic-mcp-dl16, DL16-TASK-010/011) --------------
-# HIL on DL16 Plus shows the pinned 9-byte SimpleTrigger payload never gates while the
-# 10-byte payload does. Non-immediate triggers use 8 pair bytes + 2 zero collect-type
-# bytes; immediate keeps the 9-byte instant flag. Edits only the IGNORED checkout; the
-# pinned commit content is never claimed to be modified.
-$ProtoCpp = Join-Path $Dst 'core\src\protocol.cpp'
-$OldTrig = 'payload.push_back(config.trigger.is_instantly ? 1 : 0);'
-$ptext = [System.IO.File]::ReadAllText($ProtoCpp)
-if ($ptext.Contains($OldTrig)) {
-  $newTrig = "if (config.trigger.is_instantly) {`r`n        payload.push_back(1);`r`n    } else {`r`n        payload.push_back(0);`r`n        payload.push_back(0);`r`n    }"
-  [System.IO.File]::WriteAllText($ProtoCpp, $ptext.Replace($OldTrig, $newTrig))
-  Write-Host '[note] Applied local 10-byte gated SimpleTrigger fix to ignored checkout.'
-} elseif (-not $ptext.Contains('config.trigger.is_instantly')) {
-  throw 'Pinned protocol.cpp trigger builder not found; refusing to guess.'
-}
-# -----------------------------------------------------------------------------------
-
-# --- Trigger position control (atk-logic-mcp-dl16, DL16-TASK-012) ------------------
-# Expose the pre-trigger position (default was hardcoded 10%). Adds --trigger-position
-# to the pinned CLI capture options. Edits only the IGNORED checkout.
-$CliMain = Join-Path $Dst 'cli\main.cpp'
-$OldOut = '} else if (arg == "--out" && i + 1 < argc) {'
-$ctext = [System.IO.File]::ReadAllText($CliMain)
-if ($ctext.Contains('--trigger-position')) {
-  Write-Host '[note] Trigger-position patch already present in ignored checkout.'
-} elseif ($ctext.Contains($OldOut)) {
-  $newOut = "} else if (arg == `"--trigger-position`" && i + 1 < argc) {`r`n                config.trigger.position_percent = std::stod(argv[++i]);`r`n            $OldOut"
-  [System.IO.File]::WriteAllText($CliMain, $ctext.Replace($OldOut, $newOut))
-  Write-Host '[note] Applied local --trigger-position patch to ignored checkout.'
-} else {
-  throw 'Pinned cli/main.cpp capture options not found; refusing to guess.'
-}
-# -----------------------------------------------------------------------------------
-
-# --- Multi-channel trigger conditions (atk-logic-mcp-dl16, DL16-TASK-014) -----------
-# The pinned CLI accepted a single chN:edge trigger. Accept a comma-separated list,
-# e.g. "ch8:rising,ch14:high" (all conditions AND'ed). Edits only the IGNORED checkout.
-$TrigOld = @'
-    // Format: ch0:rising or 0:rising or ch1:falling
-    std::string s = str;
-    if (s.rfind("ch", 0) == 0) s = s.substr(2);
-    auto colon = s.find(':');
-    if (colon != std::string::npos) {
-        uint8_t ch = static_cast<uint8_t>(std::stoi(s.substr(0, colon)));
-        std::string edge = s.substr(colon + 1);
-        TriggerType type = TriggerType::RisingEdge;
-        if (edge == "falling") type = TriggerType::FallingEdge;
-        else if (edge == "high") type = TriggerType::HighLevel;
-        else if (edge == "low") type = TriggerType::LowLevel;
-        else if (edge == "both" || edge == "double") type = TriggerType::DoubleEdge;
-        else if (edge == "rising") type = TriggerType::RisingEdge;
-
-        cfg.triggers.push_back({ch, type});
-        cfg.is_instantly = false;
-    } else {
-        cfg.is_instantly = true;
-    }
-'@
-$TrigNew = @'
-    // Format: ch0:rising,ch8:high (comma-separated; conditions AND'ed)
-    size_t tstart = 0;
-    while (tstart < str.size()) {
-        size_t comma = str.find(',', tstart);
-        std::string s = str.substr(tstart, comma == std::string::npos ? std::string::npos : comma - tstart);
-        tstart = (comma == std::string::npos) ? str.size() : comma + 1;
-        if (s.rfind("ch", 0) == 0) s = s.substr(2);
-        auto colon = s.find(':');
-        if (colon == std::string::npos) continue;
-        uint8_t ch = static_cast<uint8_t>(std::stoi(s.substr(0, colon)));
-        std::string edge = s.substr(colon + 1);
-        TriggerType type = TriggerType::RisingEdge;
-        if (edge == "falling") type = TriggerType::FallingEdge;
-        else if (edge == "high") type = TriggerType::HighLevel;
-        else if (edge == "low") type = TriggerType::LowLevel;
-        else if (edge == "both" || edge == "double") type = TriggerType::DoubleEdge;
-        else if (edge == "rising") type = TriggerType::RisingEdge;
-        cfg.triggers.push_back({ch, type});
-        cfg.is_instantly = false;
-    }
-'@
-$TrigOld = $TrigOld.Replace("`r`n", "`n")
-$TrigNew = $TrigNew.Replace("`r`n", "`n")
-$ctext2 = ([System.IO.File]::ReadAllText($CliMain)).Replace("`r`n", "`n")
-if ($ctext2.Contains('comma-separated')) {
-  Write-Host '[note] Multi-channel trigger patch already present in ignored checkout.'
-} elseif ($ctext2.Contains($TrigOld)) {
-  [System.IO.File]::WriteAllText($CliMain, $ctext2.Replace($TrigOld, $TrigNew))
-  Write-Host '[note] Applied local multi-channel trigger patch to ignored checkout.'
-} else {
-  throw 'Pinned cli/main.cpp parse_trigger not found; refusing to guess.'
-}
-# -----------------------------------------------------------------------------------
-
-# --- Trigger timeout (atk-logic-mcp-dl16, DL16-TASK-015) ---------------------------
-# Expose the device watchdog timeout (execute_capture default 30s) as
-# --trigger-timeout so a gated capture can fail fast. Edits only the IGNORED checkout.
-$ctext3 = ([System.IO.File]::ReadAllText($CliMain)).Replace("`r`n", "`n")
-if (-not $ctext3.Contains('--trigger-timeout')) {
-  $a1 = '        bool json_mode = false;'
-  $b1 = "        bool json_mode = false;`n        int trigger_timeout_sec = 30;"
-  $a2 = '            } else if (arg == "--out" && i + 1 < argc) {'
-  $b2 = "            } else if (arg == `"--trigger-timeout`" && i + 1 < argc) {`n                trigger_timeout_sec = std::stoi(argv[++i]);`n$a2"
-  $a3 = "            }`n        );`n        if (!json_mode) {`n            std::cout << `"\n`";"
-  $b3 = "            },`n            trigger_timeout_sec`n        );`n        if (!json_mode) {`n            std::cout << `"\n`";"
-  if ($ctext3.Contains($a1) -and $ctext3.Contains($a2) -and $ctext3.Contains($a3)) {
-    [System.IO.File]::WriteAllText($CliMain, $ctext3.Replace($a1, $b1).Replace($a2, $b2).Replace($a3, $b3))
-    Write-Host '[note] Applied local --trigger-timeout patch to ignored checkout.'
-  } else {
-    throw 'Pinned cli/main.cpp capture call not found; refusing to guess.'
-  }
-}
-# -----------------------------------------------------------------------------------
+git -C $Dst apply --check $Patch
+if ($LASTEXITCODE -ne 0) { throw "Local patch does not apply cleanly to pinned commit: $Patch" }
+git -C $Dst apply $Patch
+if ($LASTEXITCODE -ne 0) { throw 'Failed to apply local patch' }
+Write-Host "[note] Applied local patch to ignored checkout: $(Split-Path $Patch -Leaf)"
 
 if (-not $SkipBuild) {
   # Prefer the requested toolset only when it is actually installed on this machine;

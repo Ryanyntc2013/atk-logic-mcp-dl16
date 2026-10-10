@@ -1,0 +1,2 @@
+# Patches applied to the pinned upstream checkout must keep exact bytes (no EOL conversion).
+scripts/patches/*.patch -text
