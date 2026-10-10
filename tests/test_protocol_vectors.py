@@ -38,6 +38,7 @@ MATRIX = {
     "end_to_end_crop_align": ("AGREE", "order-3 crop removes only alignment padding; depth preserved"),
     "short_reply_policy": ("AGREE", "512B short reply is not fed to the 2048B 4-lane interleave"),
     "unknown_rate_fallback": ("DIFF", "CPP silently defaults an unknown rate to 20 MHz index 6"),
+    "pwm_output_config": ("AGREE", "cmd 0x17, 200 MHz counter, half-up period/duty; channels 0..1; LHX doc + original app, local live pending"),
     "device_info_usb_ids": ("DIFF", "primary 1A86:FFCC; LHX also lists 1A86:6A6B and 04B4:6A6A"),
     "trigger_gating_alignment": ("UNKNOWN", "requires physical edge + independent timing; HIL_REQUIRED"),
 }
@@ -48,7 +49,8 @@ def test_matrix_labels_are_from_known_set():
         "crc_vector", "tx_framing", "bank_transform", "trigger_nibble",
         "trigger_payload_length", "parameter_payload", "rate_mapping",
         "rx_packets", "rle_and_tails", "end_to_end_crop_align", "short_reply_policy",
-        "unknown_rate_fallback", "device_info_usb_ids", "trigger_gating_alignment",
+        "unknown_rate_fallback", "pwm_output_config", "device_info_usb_ids",
+        "trigger_gating_alignment",
     }
     for status, _note in MATRIX.values():
         assert status in {"AGREE", "DIFF", "UNKNOWN"}
@@ -368,6 +370,10 @@ def test_golden_vectors_match_artifact():
     assert v["trigger_cpp_all_immediate"] == ref.trigger_payload_cpp(list(range(16)), is_instantly=True).hex()
     assert v["trigger_lhx_all_immediate"] == ref.trigger_payload_lhx(list(range(16))).hex()
     assert v["parameter_buffer_20m_400k_t36k"] == ref.parameter_payload(True, False, 1.6, 6, 400000, 36000).hex()
+    assert v["pwm_start_ch0_1khz_50"] == ref.pwm_start_payload(0, 1000, 50.0).hex()
+    assert v["pwm_start_ch1_1khz_50"] == ref.pwm_start_payload(1, 1000, 50.0).hex()
+    assert v["pwm_stop_ch0"] == ref.pwm_stop_payload(0).hex()
+    assert v["pwm_stop_ch1"] == ref.pwm_stop_payload(1).hex()
     assert v["bank_transform_2048_sha256"] == hashlib.sha256(
         ref.convert_to_device(bytes(range(256)) * 8)).hexdigest()
     assert v["device_frame_get_device_data_sha256"] == hashlib.sha256(
@@ -480,3 +486,54 @@ def test_order3_payload_roundtrip_and_rle_flags():
     assert parsed["channel_byte_counts"][:2] == [128, 128]
     assert parsed["exceed_capacity"] is True
     assert parsed["exceed_bandwidth"] is False
+
+
+# ------------------------------------------------------------- PWM output config
+
+
+def test_pwm_start_payload_1khz_50_matches_documented_transaction():
+    payload = ref.pwm_start_payload(0, 1000, 50.0)
+    assert len(payload) == 9
+    assert payload[0] == 0x11  # (channel << 4) + 0x11
+    assert int.from_bytes(payload[1:5], "little") == 200000
+    assert int.from_bytes(payload[5:9], "little") == 100000
+    assert payload == bytes.fromhex("11400d0300a0860100")
+
+
+def test_pwm_start_payload_channel1():
+    assert ref.pwm_start_payload(1, 1000, 50.0)[0] == 0x21  # (1 << 4) + 0x11
+
+
+def test_pwm_stop_payload():
+    assert ref.pwm_stop_payload(0) == bytes([0x10])  # (0 + 1) << 4
+    assert ref.pwm_stop_payload(1) == bytes([0x20])  # (1 + 1) << 4
+
+
+def test_pwm_frame_wrapping_uses_command_0x17():
+    raw = ref.convert_to_pc(ref.pwm_start_frame(0, 1000, 50.0))
+    assert raw[8] == 0x0A
+    assert raw[9] == ref.CMD_PWM
+    assert raw[10] == 10  # 9-byte payload + 1
+    assert raw[11:20] == ref.pwm_start_payload(0, 1000, 50.0)
+    assert raw[20] == 0x0B
+    assert struct.unpack_from("<I", raw, 21)[0] == ref.compute_crc32(bytes([ref.CMD_PWM, 10]) + ref.pwm_start_payload(0, 1000, 50.0))
+
+
+def test_pwm_half_up_rounding():
+    assert ref.pwm_period_count(7) == 28571429  # 200e6/7 = 28571428.57 -> half-up
+    period = ref.pwm_period_count(1000)
+    assert ref.pwm_duty_count(period, 33.333) == 66666  # 66666.0 exactly
+    assert ref.pwm_duty_count(period, 0.00025) == 1     # 0.5 rounds up (not truncate)
+
+
+def test_pwm_validation_rejects_invalid():
+    bad_calls = [
+        lambda: ref.pwm_start_payload(2, 1000, 50.0),      # channel out of 0..1
+        lambda: ref.pwm_start_payload(0, 0, 50.0),         # freq < 1 Hz
+        lambda: ref.pwm_start_payload(0, 20_000_001, 50.0),  # freq > 20 MHz
+        lambda: ref.pwm_start_payload(0, 1000, 101.0),     # duty > 100%
+        lambda: ref.pwm_stop_payload(2),
+    ]
+    for call in bad_calls:
+        with pytest.raises(ValueError):
+            call()

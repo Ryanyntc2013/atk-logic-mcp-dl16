@@ -3,7 +3,7 @@
 **Date:** 2026-10-10
 **Status:** Phase A implemented (offline, no hardware). Phase B live gates remain `HIL_NOT_RUN`.
 **Reference implementation:** `tests/protocol_reference.py` (independent Python codec).
-**Vectors:** `tests/test_protocol_vectors.py` (38 tests, one of which runs the optional native harness) + `tests/vectors/dl16_protocol_vectors.json`. Full suite: 55 passed.
+**Vectors:** `tests/test_protocol_vectors.py` (44 tests, one of which runs the optional native harness) + `tests/vectors/dl16_protocol_vectors.json`. Full suite: 61 passed.
 
 Sources are pinned as in
 [`LHX369963-dl16-cli-cross-validation-2026-10-10.md`](LHX369963-dl16-cli-cross-validation-2026-10-10.md):
@@ -21,6 +21,7 @@ LHX `LHX369963/dl16-cli@8d7c209c1e3b13923620bb34cec915291a749612`.
 | Trigger nibble | **AGREE** | even=high nibble, odd=low; enable `0x8`, rising `+0x1`, falling `+0x2`; CH0 rising `0x90`, CH1 rising `0x09`, CH7 rising byte3 low `0x09` | `test_trigger_nibble_encoding` |
 | Trigger payload length | **DIFF** | VENDOR/CPP = **9B** (`8 pairs + instant flag`) vs LHX/HUGEL = **10B** (`8 pairs + 2 collect bytes`). Both constructed; not merged | `test_trigger_payload_is_9_bytes_cpp`, `test_trigger_payload_9b_vs_10b_divergence` |
 | Parameter payload | **AGREE** | `0x80` Buffer, `0x40` RLE, sign-magnitude 0.1V threshold, rate code, uint40 LE depth, uint40 LE trigger depth | `test_parameter_payload_bytes`, `test_parameter_payload_rle_flag_and_threshold_sign`, `test_threshold_bounds` |
+| PWM output config | **AGREE** | cmd `0x17`; 200 MHz counter; half-up period/duty; channels 0..1; local live pending (DL16-TASK-004) | `test_pwm_*` |
 | Rate mapping | **DIFF** | CPP `20M=6,25M=7,250M=12,500M=13`; LHX reports index 7 no-data and `500M=0` | `test_cpp_rate_mapping_common_vectors`, `test_rate_mapping_conflict_is_preserved` |
 | RX packets | **AGREE** | `0A order lenLE16 payload 00 0B`; reassembled across arbitrary chunk boundaries; bad footer de-syncs and recovers | `test_rx_parser_*`, `test_parse_ack_simple_trigger_status`, `test_parse_trigger_offset_channel_byte_counts` |
 | RLE and tails | **AGREE** | `(count,value)` pairs; overflow guarded; malformed odd length rejected; extra post-depth bytes never counted as samples | `test_rle_*`, `test_finalize_samples_*`, `test_apply_start_offset_byte_and_subbyte`, `test_order3_crop_decision` |

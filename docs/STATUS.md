@@ -2,8 +2,9 @@
 
 ## Independently executed checks
 
-- Python offline suite: 55 passing tests (17 core + 38 DL16-TASK-002 Phase A protocol vectors) on local Python 3.12; GitHub Actions Python offline CI successful.
+- Python offline suite: 61 passing tests (17 core + 44 DL16-TASK-002/004 protocol vectors) on local Python 3.12; GitHub Actions Python offline CI successful.
 - DL16-TASK-002 Phase A: independent offline protocol reference + byte-level vectors + hash-locked golden artifact; optional native harness confirms the pinned C++ backend matches the Python reference byte-for-byte (protocol frames and RX parsing). Preserved 9B/10B trigger and 25/500 MHz index conflicts. See `docs/research/DL16-TASK-002-phase-a-protocol-vectors.md`.
+- DL16-TASK-004 PWM output: offline codec for commands `0x17` (start/stop, 200 MHz counter, channels 0..1) implemented and tested; **live PWM not sent** (LIVE_NOT_RUN). See `docs/research/DL16-TASK-002-pwm-output.md`.
 - Windows native C++17 / libusb core build: **PASSED** on GitHub-hosted Windows Server 2022, Visual Studio 2022 / MSVC 19.44.
 - Pinned upstream native source: `gjjisadog/ATK-Logic-Mcp@5fc47744c18c99f9ad0f554a965eb8cd1160c836`.
 - CMake generation, Release compilation and static libusb linkage: **PASSED**.

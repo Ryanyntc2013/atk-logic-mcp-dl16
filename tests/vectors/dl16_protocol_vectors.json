@@ -2,6 +2,7 @@
   "schema": "dl16-protocol-vectors/1",
   "generated_by": "tests/protocol_reference.py",
   "pinned_cpp": "gjjisadog/ATK-Logic-Mcp@5fc47744c18c99f9ad0f554a965eb8cd1160c836",
+  "lhx_pwm": "LHX369963/dl16-cli@8d7c209c1e3b13923620bb34cec915291a749612",
   "vectors": {
     "crc_123456789": "d202d277",
     "crc_empty": "ffffffff",
@@ -10,6 +11,10 @@
     "trigger_cpp_all_immediate": "ffffffffffffffff01",
     "trigger_lhx_all_immediate": "ffffffffffffffff0000",
     "parameter_buffer_20m_400k_t36k": "801006801a060000a08c000000",
+    "pwm_start_ch0_1khz_50": "11400d0300a0860100",
+    "pwm_start_ch1_1khz_50": "21400d0300a0860100",
+    "pwm_stop_ch0": "10",
+    "pwm_stop_ch1": "20",
     "bank_transform_2048_sha256": "c39962860f9535683e046fcd410e69c5556972931c67afa3524367d22f8c6436",
     "device_frame_get_device_data_sha256": "29f7b66f7d27cd2076d4c7c66a6894e7300ba8a7a2c80bb770245fe6e517c4b6",
     "rx_frame_order6": "0a060000000b"

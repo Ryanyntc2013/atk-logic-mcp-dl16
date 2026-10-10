@@ -30,6 +30,16 @@ CMD_GET_DEVICE_DATA = 0x10
 CMD_PARAMETER_SETTING = 0x11
 CMD_SIMPLE_TRIGGER = 0x12
 CMD_STOP = 0x15
+CMD_PWM = 0x17
+
+# PWM output configuration (DL16 has two PWM outputs, channels 0..1).
+# Counter clock and payload layout cross-checked against LHX369963/dl16-cli
+# (docs/protocol/pwm.md, pinned 8d7c209) and the original app transaction
+# (1 kHz/50% -> period_count=200000, duty_count=100000). Independently implemented.
+PWM_COUNTER_HZ = 200_000_000
+PWM_CHANNELS = (0, 1)
+PWM_FREQ_MIN_HZ = 1
+PWM_FREQ_MAX_HZ = 20_000_000
 
 # CPP sample_rate_to_code() table (pinned backend).
 CPP_RATE_TO_CODE = {
@@ -238,6 +248,51 @@ def trigger_payload_lhx(enabled, triggers=None, collect_type: int = 0) -> bytes:
     """
     eight = trigger_payload_cpp(enabled, triggers, is_instantly=True)[:8]
     return eight + bytes([collect_type & 0xFF, (collect_type >> 8) & 0xFF])
+
+
+# --------------------------------------------------------- PWM output config
+
+
+def _pwm_validate(channel: int, frequency_hz: int, duty_percent: float) -> None:
+    if channel not in PWM_CHANNELS:
+        raise ValueError("PWM channel must be 0 or 1")
+    if not isinstance(frequency_hz, int) or not PWM_FREQ_MIN_HZ <= frequency_hz <= PWM_FREQ_MAX_HZ:
+        raise ValueError(f"PWM frequency must be an integer in [{PWM_FREQ_MIN_HZ}, {PWM_FREQ_MAX_HZ}] Hz")
+    if not 0.0 <= duty_percent <= 100.0:
+        raise ValueError("PWM duty must be within [0, 100] percent")
+
+
+def pwm_period_count(frequency_hz: int) -> int:
+    """period_count = floor(200_000_000 / frequency_hz + 0.5) (half-up)."""
+    return math.floor(PWM_COUNTER_HZ / frequency_hz + 0.5)
+
+
+def pwm_duty_count(period_count: int, duty_percent: float) -> int:
+    """duty_count = floor(period_count * duty_percent / 100 + 0.5) (half-up)."""
+    return math.floor(period_count * duty_percent / 100.0 + 0.5)
+
+
+def pwm_start_payload(channel: int, frequency_hz: int, duty_percent: float) -> bytes:
+    """PWM start payload (9 bytes): [(ch<<4)+0x11][period LE u32][duty LE u32]."""
+    _pwm_validate(channel, frequency_hz, duty_percent)
+    period = pwm_period_count(frequency_hz)
+    duty = pwm_duty_count(period, duty_percent)
+    return bytes([(channel << 4) + 0x11]) + period.to_bytes(4, "little") + duty.to_bytes(4, "little")
+
+
+def pwm_stop_payload(channel: int) -> bytes:
+    """PWM stop payload (1 byte): [(ch + 1) << 4]."""
+    if channel not in PWM_CHANNELS:
+        raise ValueError("PWM channel must be 0 or 1")
+    return bytes([(channel + 1) << 4])
+
+
+def pwm_start_frame(channel: int, frequency_hz: int, duty_percent: float) -> bytes:
+    return build_device_frame(CMD_PWM, pwm_start_payload(channel, frequency_hz, duty_percent))
+
+
+def pwm_stop_frame(channel: int) -> bytes:
+    return build_device_frame(CMD_PWM, pwm_stop_payload(channel))
 
 
 # ------------------------------------------------------------------- RX parsing
