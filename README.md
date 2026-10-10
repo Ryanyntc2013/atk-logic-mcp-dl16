@@ -2,7 +2,7 @@
 
 An **agent-first, headless MCP** workspace for ALIENTEK ATK-DL16 / DL16 Plus.
 
-> Status: **P0 scaffold and offline analysis only**. Python offline tests pass. Native USB capture relies on a **pinned GPL-3.0 upstream backend** and **HAS NOT BEEN HARDWARE VERIFIED IN THIS REPOSITORY**. Do not claim this repository passed HIL until a physical test report exists.
+> Status: **P0 scaffold / HIL_NOT_RUN**. Python offline CI passes; Windows Server 2022 + VS2022 native C++ compilation, CLI smoke test and upstream synthetic/unit tests (**28/28**) pass ([build evidence](https://github.com/Ryanyntc2013/atk-logic-mcp-dl16/actions/runs/38035288929)). Native USB capture relies on a **pinned GPL-3.0 upstream backend** and **HAS NOT BEEN HARDWARE VERIFIED IN THIS REPOSITORY**. Build success is not a physical HIL pass.
 
 ## Why this structure?
 
