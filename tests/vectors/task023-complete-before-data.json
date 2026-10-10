@@ -1,0 +1,13 @@
+{
+  "schema": "dl16-observed-order-vector/v1",
+  "source_task": "DL16-TASK-023",
+  "evidence_tier": "LOCAL_HIL_DERIVED_SEQUENCE",
+  "description": "Derived parsed-order sequence, not original USB bytes and not proof of stale-message ownership",
+  "orders": [6, 6, 6, 4, 5, 5, 5, 5],
+  "usb_read_bytes": [16384],
+  "requested_channels": [8, 14],
+  "requested_samples": 200000,
+  "samples_before_crop": {"8": 0, "14": 0},
+  "samples_after_crop": {"8": 0, "14": 0},
+  "expected_valid": false
+}
