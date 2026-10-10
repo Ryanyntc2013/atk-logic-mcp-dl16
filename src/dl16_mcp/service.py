@@ -1,13 +1,14 @@
 """Application layer shared by MCP tools and local CLI."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
 from . import backend
-from .analysis import measure_pwm, measure_skew, preview_edges
+from .analysis import measure_pwm, measure_skew, preview_edges, to_edges_csv, to_vcd
 from .artifacts import Waveform, load_atkdl, load_capture
-from .config import CaptureRequest
+from .config import CaptureRequest, exports_dir
 
 
 def logic_status() -> dict[str, Any]:
@@ -55,6 +56,33 @@ def logic_measure_pwm(capture_id: str, channel: int, atkdl_file: str | None = No
         return measure_pwm(_load(capture_id, channel, atkdl_file=atkdl_file))
     except (ValueError, FileNotFoundError, OSError, KeyError) as exc:
         return {"success": False, "error_code": "ANALYSIS_INVALID", "message": str(exc)}
+
+
+_EXPORT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+
+
+def logic_export(capture_id: str, channel: int, fmt: str = "vcd",
+                 polarity: str = "rising", atkdl_file: str | None = None,
+                 out_name: str | None = None) -> dict[str, Any]:
+    """Write a compact VCD or edge CSV of one channel; return the path, not the bytes."""
+    try:
+        wave = _load(capture_id, channel, atkdl_file=atkdl_file)
+        if fmt == "vcd":
+            content, ext = to_vcd(wave), "vcd"
+        elif fmt in ("edges", "edges_csv", "csv"):
+            content, ext = to_edges_csv(wave, polarity=polarity), "csv"
+        else:
+            raise ValueError("fmt must be 'vcd' or 'edges'")
+        name = out_name or f"{capture_id}_ch{channel:02d}.{ext}"
+        if not _EXPORT_NAME_RE.fullmatch(name):
+            raise ValueError("Unsafe export file name")
+        path = exports_dir() / name
+        path.write_text(content, encoding="utf-8")
+        return {"success": True, "format": fmt, "channel": channel,
+                "path": str(path), "bytes": path.stat().st_size,
+                "evidence_source": wave.source, "integrity": wave.integrity}
+    except (ValueError, FileNotFoundError, OSError, KeyError) as exc:
+        return {"success": False, "error_code": "EXPORT_FAILED", "message": str(exc)}
 
 
 def logic_decode(capture_id: str, protocol: str, channels: list[int],

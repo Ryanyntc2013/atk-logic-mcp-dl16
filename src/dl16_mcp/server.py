@@ -54,6 +54,18 @@ def logic_measure_pwm(capture_id: str, channel: int, atkdl_file: str | None = No
 
 
 @mcp.tool()
+def logic_export(capture_id: str, channel: int, fmt: str = "vcd",
+                 polarity: str = "rising", atkdl_file: str | None = None,
+                 out_name: str | None = None) -> dict:
+    """Export one channel to a compact VCD or edge CSV file; returns the path, not the bytes.
+
+    Edge-based output stays bounded for large captures; open the file with sigrok or
+    any waveform viewer. It never adds device or timing certification.
+    """
+    return service.logic_export(capture_id, channel, fmt, polarity, atkdl_file, out_name)
+
+
+@mcp.tool()
 def logic_decode(capture_id: str, protocol: str, channels: list[int],
                  baud_rate: int = 115200, cpol: int = 0, cpha: int = 0,
                  atkdl_file: str | None = None) -> dict:

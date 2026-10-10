@@ -184,3 +184,55 @@ def preview_edges(wave: Waveform, *, polarity: str = "rising", limit: int = 50) 
             [{"sample": int(s), "time_ns": float(s) * 1e9 / wave.sample_rate_hz}
              for s in edges[:limit]], "truncated": len(edges) > limit,
             "evidence_source": wave.source, "integrity": wave.integrity}
+
+
+def digital_transitions(raw: bytes, sample_count: int,
+                        *, max_edges: int = 2_000_000) -> tuple[np.ndarray, np.ndarray]:
+    """All level changes as (sample_index, new_level) in chronological order."""
+    rising = digital_edges(raw, sample_count, rising=True, max_edges=max_edges)
+    falling = digital_edges(raw, sample_count, rising=False, max_edges=max_edges)
+    idx = np.concatenate((rising, falling))
+    lvl = np.concatenate((np.ones(rising.shape, dtype=np.uint8),
+                          np.zeros(falling.shape, dtype=np.uint8)))
+    order = np.argsort(idx, kind="stable")
+    return idx[order], lvl[order]
+
+
+def to_vcd(wave: Waveform, *, timescale_ns: int = 1, max_edges: int = 2_000_000) -> str:
+    """Value Change Dump of one channel.
+
+    Edge-based (only changes are written), so exports stay compact and bounded;
+    the initial level is emitted at time 0. Timestamps are rounded to ns.
+    """
+    if wave.samples < 1:
+        raise AnalysisError("Cannot export an empty waveform")
+    if timescale_ns < 1:
+        raise AnalysisError("timescale_ns must be positive")
+    idx, lvl = digital_transitions(wave.raw, wave.samples, max_edges=max_edges)
+    ns_per_sample = 1e9 / wave.sample_rate_hz
+    lines = [
+        f"$timescale {timescale_ns}ns $end",
+        "$scope module dl16 $end",
+        f"$var wire 1 ! ch{wave.channel} $end",
+        "$upscope $end",
+        "$enddefinitions $end",
+        "#0",
+        f"{int(wave.raw[0] & 1)}!",
+    ]
+    for sample, level in zip(idx, lvl):
+        lines.append(f"#{int(round(int(sample) * ns_per_sample))}")
+        lines.append(f"{int(level)}!")
+    return "\n".join(lines) + "\n"
+
+
+def to_edges_csv(wave: Waveform, *, polarity: str = "rising",
+                 max_edges: int = 2_000_000) -> str:
+    """CSV of rising (or falling) edge sample index, timestamp and level."""
+    if polarity not in ("rising", "falling"):
+        raise AnalysisError("polarity must be rising or falling")
+    idx = digital_edges(wave.raw, wave.samples, rising=polarity == "rising", max_edges=max_edges)
+    ns_per_sample = 1e9 / wave.sample_rate_hz
+    level = 1 if polarity == "rising" else 0
+    rows = ["sample,time_ns,level"]
+    rows.extend(f"{int(s)},{int(round(int(s) * ns_per_sample))},{level}" for s in idx)
+    return "\n".join(rows) + "\n"

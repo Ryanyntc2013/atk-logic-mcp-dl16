@@ -19,6 +19,11 @@ def main() -> int:
     s.add_argument("--ref", type=int, required=True)
     s.add_argument("--target", type=int, required=True)
     s.add_argument("--limit-ns", type=float, default=1000)
+    e = cmd.add_parser("export")
+    e.add_argument("capture_id")
+    e.add_argument("--channel", type=int, default=0)
+    e.add_argument("--format", dest="fmt", default="vcd", choices=["vcd", "edges"])
+    e.add_argument("--polarity", default="rising", choices=["rising", "falling"])
     args = p.parse_args()
     if args.command == "status":
         result = service.logic_status()
@@ -26,6 +31,8 @@ def main() -> int:
         result = service.logic_capture([int(x.strip()) for x in args.channels.split(",")],
                                        args.sample_rate_hz, args.duration_ms, args.threshold,
                                        args.trigger)
+    elif args.command == "export":
+        result = service.logic_export(args.capture_id, args.channel, args.fmt, args.polarity)
     else:
         result = service.logic_measure_skew(args.capture_id, args.ref, args.target,
                                             max_abs_error_ns=args.limit_ns)

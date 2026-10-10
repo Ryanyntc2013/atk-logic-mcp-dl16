@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
-from dl16_mcp.analysis import AnalysisError, digital_edges, measure_skew, measure_pwm
+from dl16_mcp.analysis import (AnalysisError, digital_edges, digital_transitions,
+                               measure_pwm, measure_skew, to_edges_csv, to_vcd)
 from dl16_mcp.artifacts import Waveform
 
 
@@ -75,3 +76,31 @@ def test_across_chunk_boundaries():
     x[128 * 1024 * 8 - 1:] = 1
     w = wave(3, x)
     assert digital_edges(w.raw, w.samples).tolist() == [128 * 1024 * 8 - 1]
+
+
+def test_digital_transitions_ordered_levels():
+    w = wave(0, [0, 0, 1, 1, 0, 1, 0])
+    idx, lvl = digital_transitions(w.raw, w.samples)
+    assert idx.tolist() == [2, 4, 5, 6]
+    assert lvl.tolist() == [1, 0, 1, 0]
+
+
+def test_to_edges_csv_lsb_first_and_times():
+    w = wave(0, [0, 0, 1, 1, 0, 1, 0, 0, 1], rate=20_000_000)
+    lines = to_edges_csv(w, polarity="rising").strip().splitlines()
+    assert lines[0] == "sample,time_ns,level"
+    assert lines[1] == "2,100,1"
+    assert "5,250,1" in lines
+    falling = to_edges_csv(w, polarity="falling").strip().splitlines()
+    assert falling[1] == "4,200,0"
+
+
+def test_to_vcd_is_edge_based_with_initial_level():
+    w = wave(3, [0, 1, 1, 0], rate=20_000_000)
+    vcd = to_vcd(w)
+    assert "$timescale 1ns $end" in vcd
+    assert "$var wire 1 ! ch3 $end" in vcd
+    lines = vcd.strip().splitlines()
+    assert "#0" in lines and "0!" in lines
+    assert "#50" in lines and "#150" in lines  # 20 MHz -> 50 ns/sample
+    assert lines[-1] == "0!"  # final fall back to low

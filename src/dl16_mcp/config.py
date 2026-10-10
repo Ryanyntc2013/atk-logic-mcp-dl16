@@ -24,6 +24,12 @@ def captures_dir() -> Path:
     return path
 
 
+def exports_dir() -> Path:
+    path = workspace_dir() / "exports"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 @dataclass(frozen=True)
 class CaptureRequest:
     channels: tuple[int, ...] = (0, 1)

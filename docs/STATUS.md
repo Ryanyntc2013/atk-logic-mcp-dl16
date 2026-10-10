@@ -2,9 +2,10 @@
 
 ## Independently executed checks
 
-- Python offline suite: 61 passing tests (17 core + 44 DL16-TASK-002/004 protocol vectors) on local Python 3.12; GitHub Actions Python offline CI successful.
+- Python offline suite: 69 passing tests on local Python 3.12 (core + DL16-TASK-002/004/005 protocol vectors and export); GitHub Actions Python offline CI successful.
 - DL16-TASK-002 Phase A: independent offline protocol reference + byte-level vectors + hash-locked golden artifact; optional native harness confirms the pinned C++ backend matches the Python reference byte-for-byte (protocol frames and RX parsing). Preserved 9B/10B trigger and 25/500 MHz index conflicts. See `docs/research/DL16-TASK-002-phase-a-protocol-vectors.md`.
 - DL16-TASK-004 PWM output: offline codec for commands `0x17` (start/stop, 200 MHz counter, channels 0..1) implemented and tested; **LOCAL_HIL on this device** for PWM0->CH0 (100 Hz..20 MHz) and PWM1->CH6 (1 kHz). See `docs/research/DL16-TASK-002-pwm-output.md`.
+- DL16-TASK-005 LHX feature adoption: `logic_export` (edge-based VCD / edge-CSV) added offline and exposed via MCP + `dl16ctl export`; roadmap in `docs/research/DL16-TASK-005-lhx-feature-adoption.md`. Offline suite now 69 passing tests.
 - Reproduced research R3: `Device::open()` intermittently fails FPGA device-info parse and needs a retry; a 16-channel capture that hit it wedged the device until a physical replug.
 - Gate B3 (local, LOCAL_HIL): a simple `ch0:rising` trigger did **not** gate acquisition on this DL16 Plus (MCU v1.9/FPGA v2.22) — a no-edge capture completed promptly. Reproduces HUGEL, contradicts LHX; simple-trigger gating `UNVERIFIED`. No live encoding changed. See `docs/research/DL16-TASK-002-b3-trigger-gating-2026-10-10.md`.
 - Gate B1 (local, LOCAL_HIL): CPP sample-rate indices 1/4/5/6/7/8/9/10/11/12/13 verified via PWM loopback. Index 7 (25 MHz) and index 13 (500 MHz) both work on this unit; LHX's index-7 no-data and 500M->0 were **not** reproduced. See `docs/research/DL16-TASK-002-b1-rate-index-2026-10-10.md`.
