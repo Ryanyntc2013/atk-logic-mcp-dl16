@@ -8,6 +8,7 @@
 - Reproduced research R3: `Device::open()` intermittently fails FPGA device-info parse and needs a retry; a 16-channel capture that hit it wedged the device until a physical replug.
 - Gate B3 (local, LOCAL_HIL): a simple `ch0:rising` trigger did **not** gate acquisition on this DL16 Plus (MCU v1.9/FPGA v2.22) — a no-edge capture completed promptly. Reproduces HUGEL, contradicts LHX; simple-trigger gating `UNVERIFIED`. No live encoding changed. See `docs/research/DL16-TASK-002-b3-trigger-gating-2026-10-10.md`.
 - Gate B1 (local, LOCAL_HIL): CPP sample-rate indices 1/4/5/6/7/8/9/10/11/12/13 verified via PWM loopback. Index 7 (25 MHz) and index 13 (500 MHz) both work on this unit; LHX's index-7 no-data and 500M->0 were **not** reproduced. See `docs/research/DL16-TASK-002-b1-rate-index-2026-10-10.md`.
+- Gate B6 (local, LOCAL_HIL): 20 sequential single-attempt captures gave exactly alternating success/failure — the `open()` immediately after a completed capture fails FPGA device-info parse, the next succeeds. One retry recovers (effective 100 %). See `docs/research/DL16-TASK-002-b6-reliability-2026-10-10.md`.
 - Windows native C++17 / libusb core build: **PASSED** on GitHub-hosted Windows Server 2022, Visual Studio 2022 / MSVC 19.44.
 - Pinned upstream native source: `gjjisadog/ATK-Logic-Mcp@5fc47744c18c99f9ad0f554a965eb8cd1160c836`.
 - CMake generation, Release compilation and static libusb linkage: **PASSED**.
