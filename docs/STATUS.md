@@ -47,6 +47,8 @@
 
 ## Local hardware observed (2026-10-10, this workstation, not CI)
 
+Consolidated Phase B / HIL scoreboard: `docs/HIL-PHASE-B-STATUS.md`.
+
 - `1a86:ffcc` enumerated; `info` reports **DL16 Plus**, 16 channels, USB 2.0, MCU v1.9, FPGA v2.22.
 - Bounded `buffer` capture (CH0, immediate trigger, 20 MHz, 20 ms, 1.6 V) returned `evidence_source=REAL_HARDWARE`, `data_integrity=COMPLETE`, `trigger_ack_received=true`, `capture_complete_received=true`, 400000 samples/channel. Raw artifact kept locally (ignored).
 - **HIL_PASS is NOT issued**: no independent-instrument comparison and no real trigger-gating test were performed; these remain `HIL_NOT_RUN`.
