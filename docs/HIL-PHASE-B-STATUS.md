@@ -112,6 +112,10 @@ Evidence now includes full durable request/response JSONL and per-step records u
 
 Operator restored the device; fresh readiness passed. With TASK-022 diagnostic CLI, first corrected CH8/CH14 capture passed. Second received exactly one aligned 16,384-byte read, message orders `[6,6,6,4,5,5,5,5]`, no channel-data messages, zero samples before and after crop. Stop-on-failure worked; no third request or reset. This rules out crop clearing for this run and prioritizes completion-message ownership/lifecycle investigation, but does not prove the Complete messages came from the prior acquisition. Full report and evidence mapping: [TASK-023](tasks/DL16-TASK-023-session-complete-order-hil.md). Session remains unaccepted; one-shot default and B6 retry retained.
 
+## DL16-TASK-026 — pre-arm flush observations (FAILED)
+
+After operator restoration/readiness pass, both capture requests recorded successful wake writes. Both wake-internal and explicit flushes reached their existing 50-read cap: 102,400 bytes each, no errors, no empty read. First capture passed; second again received `[6,6,6,4,5,5,5,5]` without channel data, zero samples before/after crop. Cap saturation is therefore not sufficient to explain the failure, and flush data content/packet ownership remains unknown. No replay/reset or enlarged drain. See [TASK-026](tasks/DL16-TASK-026-prearm-hil.md). Session remains unaccepted.
+
 ## Build patches applied to the ignored checkout (reproducible)
 
 All local native changes are one patch: scripts/patches/atk-dl16-local-build.patch, applied
