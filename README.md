@@ -10,6 +10,12 @@ We intentionally **reuse** mature USB transport, hardware framing, trigger ACK h
 
 We add a single MCP entry point with offline `.atkdl` loading and **cross-channel skew / missed-pulse analysis** for 1us-class synchronization experiments. Firmware/capture details are checked against the [official ALIENTEK GUI source](https://github.com/alientek-openedv/atk-logic); decoder design and edge-cases are cross-checked against [sigrokdecode](https://github.com/alientek-openedv/atk_libsigrokdecode) and the community [hugelzhang/atk-logic-mcp](https://github.com/hugelzhang/atk-logic-mcp). The latter two are reference projects, **not** presently embedded as runtime dependencies. See [SOURCES.md](docs/SOURCES.md).
 
+## New independent cross-validation (2026-10-10)
+
+The [LHX369963/dl16-cli protocol review](docs/research/LHX369963-dl16-cli-cross-validation-2026-10-10.md) compares pinned vendor, C++ and independent Python implementations, including author-reported DL16 live tests. **Do not treat source agreement or other authors' HIL as this project's hardware acceptance.** Critical unresolved differences: **25/500MHz sample-rate indices, 9/10-byte simple triggers, 512-byte MCU/FPGA replies, order-3 crop and mode-specific tail bytes**. The runtime backend has **not** been replaced.
+
+For local follow-up: first verify the physical device baseline with [DL16-TASK-001](docs/LOCAL-HANDOFF.md), then execute [DL16-TASK-002](docs/tasks/DL16-TASK-002.md) (offline vectors may run before TASK-001 hardware validation; device tests are gated).
+
 ## Architecture
 
 ```text
