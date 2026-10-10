@@ -1,0 +1,186 @@
+"""Pure offline signal analysis. No native library, USB or MCP imports required."""
+from __future__ import annotations
+
+from collections.abc import Iterable
+from typing import Any
+import math
+
+import numpy as np
+
+from .artifacts import Waveform
+
+
+class AnalysisError(ValueError):
+    pass
+
+
+def digital_edges(raw: bytes, sample_count: int, *, rising: bool = True,
+                  max_edges: int = 2_000_000) -> np.ndarray:
+    """Return sample indices of rising/falling edges, bit 0 first in each byte.
+
+    Chunked unpacking bounds peak memory for large captures. Includes transitions
+    between chunks, and never counts trailing padding bits as samples.
+    """
+    if sample_count < 0 or sample_count > len(raw) * 8:
+        raise AnalysisError("Invalid sample count for packed waveform")
+    if max_edges < 1:
+        raise AnalysisError("max_edges must be positive")
+    if sample_count == 0:
+        return np.empty(0, dtype=np.int64)
+    all_edges: list[np.ndarray] = []
+    last_bit: int | None = None
+    edges_total = 0
+    bits_seen = 0
+    chunk_bytes = 128 * 1024
+    for offset in range(0, len(raw), chunk_bytes):
+        if bits_seen >= sample_count:
+            break
+        chunk = raw[offset:offset + chunk_bytes]
+        bits = np.unpackbits(np.frombuffer(chunk, dtype=np.uint8), bitorder="little")
+        bits = bits[:sample_count - bits_seen]
+        if not bits.size:
+            break
+        transitions = np.flatnonzero(np.diff(bits.astype(np.int8)) == (1 if rising else -1)) + 1
+        if last_bit is not None and int(bits[0]) - last_bit == (1 if rising else -1):
+            transitions = np.concatenate((np.array([0], dtype=np.int64), transitions))
+        if transitions.size:
+            all_edges.append(transitions.astype(np.int64) + bits_seen)
+            edges_total += transitions.size
+            if edges_total > max_edges:
+                raise AnalysisError("Too many edges: narrow the analysis window or increase max_edges")
+        bits_seen += bits.size
+        last_bit = int(bits[-1])
+    return np.concatenate(all_edges) if all_edges else np.empty(0, dtype=np.int64)
+
+
+def _summary_ns(values_ns: np.ndarray) -> dict[str, float]:
+    return {"min_ns": float(np.min(values_ns)),
+            "max_ns": float(np.max(values_ns)),
+            "mean_ns": float(np.mean(values_ns)),
+            "median_ns": float(np.median(values_ns)),
+            "std_ns": float(np.std(values_ns)),
+            "p95_abs_ns": float(np.percentile(np.abs(values_ns), 95)),
+            "p99_abs_ns": float(np.percentile(np.abs(values_ns), 99)),
+            "max_abs_ns": float(np.max(np.abs(values_ns)))}
+
+
+def measure_skew(reference: Waveform, target: Waveform, *,
+                 polarity: str = "rising", expected_delay_ns: float = 0.0,
+                 match_window_ns: float | None = None,
+                 max_abs_error_ns: float | None = None,
+                 max_edges: int = 2_000_000) -> dict[str, Any]:
+    """Pair each reference edge with at most one target edge in time order.
+
+    Delay is t(target) - t(reference). Error is delay - expected_delay_ns.
+    Matching window should be wider than expected jitter but less than half a
+    pulse period. Returns a waveform verdict, never a device certification.
+    """
+    if polarity not in ("rising", "falling"):
+        raise AnalysisError("polarity must be rising or falling")
+    if reference.channel == target.channel:
+        raise AnalysisError("Reference and target must be distinct channels")
+    if abs(reference.sample_rate_hz - target.sample_rate_hz) > max(1e-6, reference.sample_rate_hz * 1e-12):
+        raise AnalysisError("Channel sample rates differ")
+    if reference.samples != target.samples:
+        raise AnalysisError("Channels have different valid sample counts")
+    sr = reference.sample_rate_hz
+    if sr <= 0 or not math.isfinite(sr):
+        raise AnalysisError("Invalid sample rate")
+    if not math.isfinite(expected_delay_ns):
+        raise AnalysisError("Invalid expected delay")
+    rising = polarity == "rising"
+    ref_edges = digital_edges(reference.raw, reference.samples, rising=rising, max_edges=max_edges)
+    tar_edges = digital_edges(target.raw, target.samples, rising=rising, max_edges=max_edges)
+    period = np.diff(ref_edges)
+    if match_window_ns is None:
+        if not period.size:
+            raise AnalysisError("At least two reference pulses needed to infer matching window")
+        match_window_samples = max(1, int(float(np.median(period)) * 0.45))
+        window_ns = match_window_samples / sr * 1e9
+    else:
+        if not math.isfinite(match_window_ns) or match_window_ns <= 0:
+            raise AnalysisError("match_window_ns must be positive and finite")
+        window_ns = float(match_window_ns)
+        match_window_samples = window_ns * sr / 1e9
+    expected_samples = expected_delay_ns * sr / 1e9
+    # Monotonic nearest-neighbor matching; uniquely consumes target pulses.
+    j = 0
+    pairs: list[tuple[int, int]] = []
+    for ri in ref_edges:
+        ideal = float(ri) + expected_samples
+        while j < len(tar_edges) and tar_edges[j] < ideal - match_window_samples:
+            j += 1
+        options = [k for k in (j, j + 1) if k < len(tar_edges)
+                   and abs(float(tar_edges[k]) - ideal) <= match_window_samples]
+        if options:
+            best = min(options, key=lambda k: abs(float(tar_edges[k]) - ideal))
+            pairs.append((int(ri), int(tar_edges[best])))
+            j = best + 1
+    result: dict[str, Any] = {
+        "reference_channel": reference.channel, "target_channel": target.channel,
+        "sample_rate_hz": sr, "sample_resolution_ns": 1e9 / sr,
+        "polarity": polarity, "expected_delay_ns": expected_delay_ns,
+        "match_window_ns": window_ns, "reference_edges": len(ref_edges),
+        "target_edges": len(tar_edges), "matched_pairs": len(pairs),
+        "missing_target_pulses": len(ref_edges) - len(pairs),
+        "unmatched_target_pulses": len(tar_edges) - len(pairs),
+        "reference_integrity": reference.integrity, "target_integrity": target.integrity,
+        "evidence_source": reference.source, "verdict": "NOT_EVALUATED",
+    }
+    if not pairs:
+        result["message"] = "No matched pulse pairs; cannot evaluate timing"
+        return result
+    samples = np.array(pairs, dtype=np.int64)
+    delays = (samples[:, 1].astype(np.float64) - samples[:, 0]) * 1e9 / sr
+    errors = delays - expected_delay_ns
+    result["delay"] = _summary_ns(delays)
+    result["error"] = _summary_ns(errors)
+    result["preview_pairs"] = [
+        {"reference_sample": int(a), "target_sample": int(b),
+         "delay_ns": float(d)} for (a, b), d in zip(pairs[:20], delays[:20])
+    ]
+    verified_inputs = (reference.integrity == "COMPLETE" and target.integrity == "COMPLETE")
+    result["quality_warnings"] = []
+    if not verified_inputs:
+        result["quality_warnings"].append("Capture metadata not verified as complete")
+    if max_abs_error_ns is not None:
+        if not math.isfinite(max_abs_error_ns) or max_abs_error_ns <= 0:
+            raise AnalysisError("max_abs_error_ns must be positive and finite")
+        if 1e9 / sr > max_abs_error_ns / 4:
+            result["quality_warnings"].append("Sample resolution is coarse relative to requested tolerance")
+        if verified_inputs:
+            within = bool(result["error"]["max_abs_ns"] <= max_abs_error_ns)
+            no_missing = result["missing_target_pulses"] == 0 and result["unmatched_target_pulses"] == 0
+            result["verdict"] = "PASS_WAVEFORM" if within and no_missing else "FAIL_WAVEFORM"
+        else:
+            result["verdict"] = "NOT_EVALUATED"
+    return result
+
+
+def measure_pwm(wave: Waveform, *, polarity: str = "rising") -> dict[str, Any]:
+    rising = polarity == "rising"
+    edges = digital_edges(wave.raw, wave.samples, rising=rising)
+    if edges.size < 3:
+        return {"valid": False, "message": "Too few complete cycles", "edges": int(edges.size)}
+    periods = np.diff(edges).astype(float)
+    median = float(np.median(periods))
+    # Robust median avoids frequency distortion from sparse missing/extra edges.
+    if median <= 0:
+        raise AnalysisError("Non-positive period")
+    return {"valid": True, "channel": wave.channel, "cycles": len(periods),
+            "frequency_hz_median": wave.sample_rate_hz / median,
+            "period_ns_median": median * 1e9 / wave.sample_rate_hz,
+            "period_samples_min": int(np.min(periods)),
+            "period_samples_max": int(np.max(periods)),
+            "period_ns_jitter_rms": float(np.std(periods)) * 1e9 / wave.sample_rate_hz,
+            "evidence_source": wave.source, "integrity": wave.integrity}
+
+
+def preview_edges(wave: Waveform, *, polarity: str = "rising", limit: int = 50) -> dict[str, Any]:
+    if not 1 <= limit <= 1000:
+        raise AnalysisError("limit must be 1..1000")
+    edges = digital_edges(wave.raw, wave.samples, rising=polarity == "rising")
+    return {"channel": wave.channel, "edge_count": len(edges), "edges":
+            [{"sample": int(s), "time_ns": float(s) * 1e9 / wave.sample_rate_hz}
+             for s in edges[:limit]], "truncated": len(edges) > limit,
+            "evidence_source": wave.source, "integrity": wave.integrity}

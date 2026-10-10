@@ -1,0 +1,12 @@
+name: Native Windows build (manual; no hardware)
+on:
+  workflow_dispatch:
+jobs:
+  native:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build pinned upstream C++ and run its unit tests
+        shell: pwsh
+        run: .\scripts\bootstrap-native.ps1

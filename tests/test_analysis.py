@@ -1,0 +1,77 @@
+import numpy as np
+import pytest
+from dl16_mcp.analysis import AnalysisError, digital_edges, measure_skew, measure_pwm
+from dl16_mcp.artifacts import Waveform
+
+
+def wave(ch, samples, rate=20_000_000, integrity="COMPLETE"):
+    return Waveform(ch, np.packbits(np.asarray(samples, dtype=np.uint8), bitorder="little").tobytes(),
+                    len(samples), rate, integrity, "SYNTHETIC", {})
+
+
+def pulse(n=20_000, period=200, shift=0, missing=None):
+    x = np.zeros(n, dtype=np.uint8)
+    for k, pos in enumerate(range(100 + shift, n - 100, period)):
+        if k == missing:
+            continue
+        x[pos:pos + 20] = 1
+    return x
+
+
+def test_edges_lsb_first_and_end_padding():
+    w = wave(0, [0, 0, 1, 1, 0, 1, 0, 0, 1])
+    assert digital_edges(w.raw, w.samples).tolist() == [2, 5, 8]
+    assert digital_edges(w.raw, w.samples, rising=False).tolist() == [4, 6]
+
+
+def test_skew_positive_250ns_and_waveform_pass():
+    a = wave(3, pulse())
+    b = wave(7, pulse(shift=5))
+    r = measure_skew(a, b, max_abs_error_ns=1000)
+    assert r["matched_pairs"] > 90
+    assert r["delay"]["median_ns"] == pytest.approx(250.0)
+    assert r["missing_target_pulses"] == 0
+    assert r["verdict"] == "PASS_WAVEFORM"
+
+
+def test_skew_negative_delay():
+    a = wave(3, pulse(shift=6))
+    b = wave(7, pulse(shift=1))
+    r = measure_skew(a, b, max_abs_error_ns=1000)
+    assert r["delay"]["median_ns"] == pytest.approx(-250.0)
+
+
+def test_missing_pulse_forces_fail():
+    a = wave(3, pulse())
+    b = wave(7, pulse(shift=4, missing=12))
+    r = measure_skew(a, b, max_abs_error_ns=1000)
+    assert r["missing_target_pulses"] == 1
+    assert r["verdict"] == "FAIL_WAVEFORM"
+
+
+def test_failed_tolerance():
+    r = measure_skew(wave(3, pulse()), wave(7, pulse(shift=30)), max_abs_error_ns=1000)
+    assert r["verdict"] == "FAIL_WAVEFORM"
+
+
+def test_quality_gate():
+    r = measure_skew(wave(3, pulse(), integrity="UNVERIFIED"), wave(7, pulse(shift=5)),
+                     max_abs_error_ns=1000)
+    assert r["verdict"] == "NOT_EVALUATED"
+
+
+def test_no_reference_pulses():
+    with pytest.raises(AnalysisError):
+        measure_skew(wave(3, np.zeros(100)), wave(7, np.zeros(100)))
+
+
+def test_pwm_median_period():
+    r = measure_pwm(wave(3, pulse()))
+    assert r["frequency_hz_median"] == pytest.approx(100_000.0)
+
+
+def test_across_chunk_boundaries():
+    x = np.zeros(128 * 1024 * 8 + 100, dtype=np.uint8)
+    x[128 * 1024 * 8 - 1:] = 1
+    w = wave(3, x)
+    assert digital_edges(w.raw, w.samples).tolist() == [128 * 1024 * 8 - 1]

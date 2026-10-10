@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "atk-logic-mcp-dl16"
+version = "0.1.0"
+description = "Headless ATK-DL16 MCP gateway and deterministic offline timing analysis"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "GPL-3.0-or-later"
+authors = [{name = "ATK DL16 MCP contributors"}]
+dependencies = ["numpy>=1.24,<3", "mcp>=1.28,<2"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+dl16-mcp = "dl16_mcp.server:main"
+dl16ctl = "dl16_mcp.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
