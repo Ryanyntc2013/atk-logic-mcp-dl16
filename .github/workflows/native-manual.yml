@@ -5,6 +5,12 @@ on:
     paths:
       - '.github/workflows/native-manual.yml'
       - 'scripts/bootstrap-native.ps1'
+      - 'scripts/build-vector-harness.ps1'
+      - 'scripts/patches/**'
+      - 'tests/native/**'
+      - 'tests/protocol_reference.py'
+      - 'tests/test_protocol_vectors.py'
+      - 'tests/vectors/**'
   workflow_dispatch:
 
 jobs:
@@ -28,3 +34,14 @@ jobs:
           if (-not (Test-Path $exe)) { throw "Expected binary missing: $exe" }
           & $exe
           if ($LASTEXITCODE -ne 0) { throw 'CLI smoke test failed' }
+      - name: Build offline C++/Python protocol cross-check harness
+        shell: pwsh
+        run: .\scripts\build-vector-harness.ps1 -Toolset auto
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Cross-check protocol vectors (CPP harness vs Python reference)
+        shell: pwsh
+        run: |
+          python -m pip install -e '.[dev]'
+          python -m pytest -q tests/test_protocol_vectors.py
