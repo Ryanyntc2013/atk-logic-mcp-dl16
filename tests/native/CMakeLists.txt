@@ -34,6 +34,14 @@ target_link_libraries(dl16-diagnostics-test PRIVATE "${UP}/build/Release/atkdl16
 add_executable(dl16-experimental-lifecycle-test experimental_lifecycle_test.cpp)
 target_include_directories(dl16-experimental-lifecycle-test PRIVATE "${UP}/core/include")
 
+# USB-free session protocol and PWM helper/codec test (DL16-TASK-032).
+add_executable(dl16-session-pwm-test session_pwm_test.cpp)
+target_include_directories(dl16-session-pwm-test PRIVATE
+    "${UP}/core/include"
+    "${UP}/cli"
+)
+target_link_libraries(dl16-session-pwm-test PRIVATE "${UP}/build/Release/atkdl16_core.lib")
+
 # Bounded PWM output sender (DL16-TASK-004); drives approved loopback wiring only.
 add_executable(dl16-pwm pwm_tool.cpp)
 target_include_directories(dl16-pwm PRIVATE

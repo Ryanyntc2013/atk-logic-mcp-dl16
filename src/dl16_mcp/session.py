@@ -295,8 +295,7 @@ class NativeSession:
                 try:
                     self._request_locked({"command": "close"}, timeout_s=STOP_GRACE_SECONDS)
                 except SessionFailure as exc:
-                    if exc.code == "SESSION_JOURNAL_ERROR":
-                        evidence_error = exc
+                    evidence_error = exc
             cleanup = self._stop_child()
             if self._journal is not None:
                 try:

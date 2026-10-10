@@ -1,0 +1,82 @@
+diff --git a/cli/main.cpp b/cli/main.cpp
+index 396c9b5..009932d 100644
+--- a/cli/main.cpp
++++ b/cli/main.cpp
+@@ -179,3 +179,11 @@ static int run_session_jsonl(){
+         }
+-        CaptureEngine engine(dev);auto result=engine.execute_capture(cfg,out,nullptr,timeout);std::string json=session::compact_json(serialize_capture_result_json(result,out));if(!json.empty()&&json.back()=='\n')json.pop_back();
++        CaptureEngine engine(dev);auto result=engine.execute_capture(cfg,out,nullptr,timeout);
++        result.cleanup_stop_attempted=engine.cleanup_stop_attempted();
++        result.cleanup_stop_ok=result.cleanup_stop_attempted && static_cast<bool>(engine.cleanup_stop_result());
++        if(result.cleanup_stop_attempted && !result.cleanup_stop_ok){
++            result.success=false;result.error_code=ErrorCode::UsbTransferError;
++            result.error_message="Capture final stop transfer failed: "+engine.cleanup_stop_result().message;
++            result.data_integrity=DataIntegrity::Incomplete;
++        }
++        std::string json=session::compact_json(serialize_capture_result_json(result,out));if(!json.empty()&&json.back()=='\n')json.pop_back();
+         std::cout<<session::response(id,"\"ok\":true,\"session\":\"ready\",\"result\":"+json)<<std::flush;
+diff --git a/core/include/atkdl16/capture.h b/core/include/atkdl16/capture.h
+index 2c7d448..d325845 100644
+--- a/core/include/atkdl16/capture.h
++++ b/core/include/atkdl16/capture.h
+@@ -31,2 +31,5 @@ public:
+ 
++    bool cleanup_stop_attempted() const { return m_cleanup_stop_attempted; }
++    const Error& cleanup_stop_result() const { return m_cleanup_stop_result; }
++
+     // Current state
+@@ -36,2 +39,4 @@ private:
+     Device& m_device;
++    bool m_cleanup_stop_attempted{false};
++    Error m_cleanup_stop_result{Error::ok()};
+     std::atomic<CaptureState> m_state{CaptureState::Disconnected};
+diff --git a/core/include/atkdl16/types.h b/core/include/atkdl16/types.h
+index 61b6b9c..1acb45c 100644
+--- a/core/include/atkdl16/types.h
++++ b/core/include/atkdl16/types.h
+@@ -226,2 +226,3 @@ struct CaptureResult {
+     CaptureDiagnostics diagnostics;
++    bool cleanup_stop_attempted{false}, cleanup_stop_ok{false};
+ 
+diff --git a/core/src/capture.cpp b/core/src/capture.cpp
+index 5049732..48db75c 100644
+--- a/core/src/capture.cpp
++++ b/core/src/capture.cpp
+@@ -50,2 +50,4 @@ CaptureResult CaptureEngine::execute_capture(const CaptureConfig& config,
+     m_stop_requested = false;
++    m_cleanup_stop_attempted = false;
++    m_cleanup_stop_result = Error::ok();
+ 
+@@ -65,3 +67,3 @@ CaptureResult CaptureEngine::execute_capture(const CaptureConfig& config,
+     struct StopCleanup {
+-        Device& device; bool enabled;
++        Device& device; bool enabled; bool& attempted; Error& outcome;
+         ~StopCleanup() {
+@@ -69,6 +71,7 @@ CaptureResult CaptureEngine::execute_capture(const CaptureConfig& config,
+                 auto frame = build_stop_frame();
+-                device.transport().write_bulk(EP_BULK_OUT, frame.data(), frame.size(), 100);
++                attempted = true;
++                outcome = device.transport().write_bulk(EP_BULK_OUT, frame.data(), frame.size(), 100);
+             }
+         }
+-    } cleanup{m_device, config.experimental_session_lifecycle};
++    } cleanup{m_device, config.experimental_session_lifecycle, m_cleanup_stop_attempted, m_cleanup_stop_result};
+ 
+diff --git a/core/src/json_util.cpp b/core/src/json_util.cpp
+index 0769304..5945a8d 100644
+--- a/core/src/json_util.cpp
++++ b/core/src/json_util.cpp
+@@ -80,3 +80,5 @@ std::string serialize_capture_result_json(const CaptureResult& result, const std
+         }
+-        ss << "],\n  \"diagnostics\": " << diagnostic_json(result.diagnostics) << "\n}\n";
++        ss << "],\n  \"diagnostics\": " << diagnostic_json(result.diagnostics)
++       << ",\n  \"cleanup_stop_attempted\": " << (result.cleanup_stop_attempted ? "true":"false")
++       << ",\n  \"cleanup_stop_ok\": " << (result.cleanup_stop_ok ? "true":"false") << "\n}\n";
+         return ss.str();
+@@ -113,3 +115,5 @@ std::string serialize_capture_result_json(const CaptureResult& result, const std
+     }
+-    ss << "],\n  \"diagnostics\": " << diagnostic_json(result.diagnostics) << "\n}\n";
++    ss << "],\n  \"diagnostics\": " << diagnostic_json(result.diagnostics)
++       << ",\n  \"cleanup_stop_attempted\": " << (result.cleanup_stop_attempted ? "true":"false")
++       << ",\n  \"cleanup_stop_ok\": " << (result.cleanup_stop_ok ? "true":"false") << "\n}\n";
+     return ss.str();

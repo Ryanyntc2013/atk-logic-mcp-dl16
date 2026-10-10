@@ -46,6 +46,10 @@ The additive pre-arm patch observes the pinned CPP wake write and its existing i
 
 Operator requested an independently implemented experiment based on documented LHX initialize-once, depth-based ordinary acquisition and final-stop principles. The native opt-in is not a port or compatibility claim: pinned framing/crop/marker requirements remain, no LHX source was copied/translated, and local physical validation is pending. See [TASK-027](tasks/DL16-TASK-027-experimental-depth-stop.md). Sufficient bytes/markers do not establish acquisition generation ownership.
 
+## Single-owner PWM and failure boundary (DL16-TASK-032)
+
+Native session PWM payloads are independently derived from this repository's reviewed TASK-004 helper and versioned PWM vectors. No new LHX code copied. The depth-stop lifecycle remains a behavioral experiment, not an exact LHX port. Dual known waveforms passed locally when configured in one Device ownership interval; timeout reuse failed and is now handled by closing the failed owner before a later explicit request. See [TASK-032](tasks/DL16-TASK-032-single-owner-long-session.md). Host stop-transfer success is not firmware acknowledgement or waveform generation authenticity.
+
 ## License hygiene
 
 - Keep provenance, git commit IDs and third-party NOTICE when embedding source in the future.

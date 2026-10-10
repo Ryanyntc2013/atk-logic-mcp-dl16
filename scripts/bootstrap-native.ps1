@@ -66,6 +66,20 @@ git -C $Dst apply --check $LifecyclePatch
 if ($LASTEXITCODE -ne 0) { throw 'Experimental lifecycle patch check failed' }
 git -C $Dst apply $LifecyclePatch
 if ($LASTEXITCODE -ne 0) { throw 'Experimental lifecycle patch apply failed' }
+$PwmPatch = Join-Path $RepoRoot 'scripts\patches\atk-dl16-session-pwm.patch'
+if (Test-Path $PwmPatch) {
+  git -C $Dst apply --check $PwmPatch
+  if ($LASTEXITCODE -ne 0) { throw 'PWM session patch check failed' }
+  git -C $Dst apply $PwmPatch
+  if ($LASTEXITCODE -ne 0) { throw 'PWM session patch apply failed' }
+  Write-Host "[note] Applied PWM session patch to ignored checkout: $(Split-Path $PwmPatch -Leaf)"
+}
+
+$StopPatch = Join-Path $RepoRoot 'scripts\patches\atk-dl16-stop-observation.patch'
+git -C $Dst apply --check $StopPatch
+if ($LASTEXITCODE -ne 0) { throw 'Stop observation patch check failed' }
+git -C $Dst apply $StopPatch
+if ($LASTEXITCODE -ne 0) { throw 'Stop observation patch apply failed' }
 
 if (-not $SkipBuild) {
   # Prefer the requested toolset only when it is actually installed on this machine;

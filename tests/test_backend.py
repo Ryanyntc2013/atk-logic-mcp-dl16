@@ -263,3 +263,25 @@ def test_session_failure_never_falls_back_or_replays(monkeypatch, tmp_path):
     assert result["error_code"] == "SESSION_TIMEOUT"
     assert fake.calls == 1
     assert run.call_count == 0
+
+
+def test_native_capture_failure_closes_session_without_replay(monkeypatch, tmp_path):
+    _cli_file(monkeypatch, tmp_path)
+    monkeypatch.setenv("DL16_BACKEND_MODE", "session")
+
+    class Session:
+        def __init__(self):
+            self.requests = 0
+            self.closed = False
+        def request(self, request, timeout_s):
+            self.requests += 1
+            return {"result": {"success": False, "error_code": "CAPTURE_TIMEOUT"}}
+        def close(self):
+            self.closed = True
+
+    session = Session()
+    monkeypatch.setattr(backend, "_get_session", lambda cli: session)
+    result = backend.capture(CaptureRequest())
+    assert session.requests == 1 and session.closed
+    assert result["error_code"] == "CAPTURE_TIMEOUT"
+    assert result["session_invalidated"] is True

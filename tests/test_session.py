@@ -39,7 +39,27 @@ for line in sys.stdin:
         print(json.dumps({"request_id":req["request_id"],"ok":True,"session":"ready"}), flush=True)
     elif command == "capture":
         print(json.dumps({"request_id":req["request_id"],"ok":True,"result":{"success":True}}), flush=True)
+    elif command == "pwm":
+        op = req.get("op")
+        output = req.get("output")
+        freq = req.get("frequency_hz")
+        duty = req.get("duty_percent")
+        if output not in (0, 1):
+            print(json.dumps({"request_id":req["request_id"],"ok":False,"error_code":"INVALID_PWM","message":"output must be 0 or 1"}), flush=True)
+            continue
+        if op == "configure":
+            if freq is None or not (1 <= freq <= 20000000) or duty is None or not (0.0 <= duty <= 100.0):
+                print(json.dumps({"request_id":req["request_id"],"ok":False,"error_code":"INVALID_PWM","message":"invalid pwm parameters"}), flush=True)
+                continue
+            print(json.dumps({"request_id":req["request_id"],"ok":True,"action":"configure","output":output,"payload":"11400d0300a0860100"}), flush=True)
+        elif op == "stop":
+            print(json.dumps({"request_id":req["request_id"],"ok":True,"action":"stop","output":output,"payload":"10" if output==0 else "20"}), flush=True)
+        else:
+            print(json.dumps({"request_id":req["request_id"],"ok":False,"error_code":"INVALID_PWM","message":"unknown op"}), flush=True)
     elif command == "close":
+        if mode == "cleanup_fail":
+            print(json.dumps({"request_id":req["request_id"],"ok":False,"error_code":"CLEANUP_FAILED","message":"device not open to stop session PWM outputs"}), flush=True)
+            sys.exit(1)
         print(json.dumps({"request_id":req["request_id"],"ok":True,"session":"closing"}), flush=True)
         sys.exit(0)
 '''
@@ -157,3 +177,44 @@ def test_concurrent_callers_are_serialized_and_receive_matching_ids(tmp_path):
         assert record.read_text(encoding="utf-8").splitlines().count("status") == 6
     finally:
         session.close()
+
+
+def test_session_pwm_configure_and_stop_protocol(tmp_path):
+    record = tmp_path / "commands.log"
+    factory, calls = _factory("ok", record)
+    session = NativeSession(Path("worker"), popen_factory=factory)
+    try:
+        res0 = session.request({"command": "pwm", "op": "configure", "output": 0, "frequency_hz": 1000, "duty_percent": 50.0}, timeout_s=2)
+        assert res0["ok"] is True
+        assert res0["action"] == "configure"
+        assert res0["output"] == 0
+
+        res1 = session.request({"command": "pwm", "op": "configure", "output": 1, "frequency_hz": 2000, "duty_percent": 50.0}, timeout_s=2)
+        assert res1["ok"] is True
+        assert res1["output"] == 1
+
+        stop0 = session.request({"command": "pwm", "op": "stop", "output": 0}, timeout_s=2)
+        assert stop0["ok"] is True
+        assert stop0["action"] == "stop"
+
+        with pytest.raises(SessionFailure) as invalid:
+            session.request({"command": "pwm", "op": "configure", "output": 5, "frequency_hz": 1000, "duty_percent": 50.0}, timeout_s=2)
+        assert invalid.value.code == "INVALID_PWM"
+    finally:
+        session.close()
+
+
+def test_session_close_propagates_cleanup_error(tmp_path):
+    record = tmp_path / "commands.log"
+    factory, calls = _factory("cleanup_fail", record)
+    session = NativeSession(Path("worker"), popen_factory=factory)
+    try:
+        session.request({"command": "status"}, timeout_s=2)
+        with pytest.raises(SessionFailure) as caught:
+            session.close()
+        assert caught.value.code == "CLEANUP_FAILED"
+        assert "stop session PWM" in str(caught.value)
+    finally:
+        # Subsequent close is idempotent
+        session.close()
+    assert session.pid is None

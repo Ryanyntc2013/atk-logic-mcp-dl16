@@ -1,0 +1,146 @@
+﻿diff --git a/cli/main.cpp b/cli/main.cpp
+index f33927e..419490b 100644
+--- a/cli/main.cpp
++++ b/cli/main.cpp
+@@ -11,6 +11,7 @@
+ #include <sstream>
+ #include <iomanip>
+ #include <limits>
++#include <set>
+ #include <cstdlib>
+ 
+ using namespace atkdl16;
+@@ -89,6 +90,7 @@ static bool session_line(std::istream& in,std::string& line,bool& oversized){con
+ 
+ static int run_session_jsonl(){
+     Device dev; bool opened=false; std::string line; bool oversized=false;
++    std::set<int> owned_pwm;
+     while(session_line(std::cin,line,oversized)){
+         if(oversized){std::cout<<session::error_response("","LINE_TOO_LARGE","JSONL line exceeds 65536 bytes")<<std::flush;continue;}
+         if(line.empty()){std::cout<<session::error_response("","EMPTY_REQUEST","empty JSONL request")<<std::flush;continue;}
+@@ -101,8 +103,57 @@ static int run_session_jsonl(){
+             int version=0;if(!session::get_integer(req,"protocol",version)||version!=1){std::cout<<session::error_response(id,"UNSUPPORTED_PROTOCOL","protocol must equal 1")<<std::flush;continue;}
+-            std::cout<<session::response(id,"\"ok\":true,\"protocol\":1,\"native_version\":\"1.0.0\",\"commands\":[\"status\",\"capture\",\"close\"]")<<std::flush;continue;
++            std::cout<<session::response(id,"\"ok\":true,\"protocol\":1,\"native_version\":\"1.0.0\",\"commands\":[\"status\",\"capture\",\"pwm\",\"close\"]")<<std::flush;continue;
+         }
+-        if(cmd=="close") {std::cout<<session::response(id,"\"ok\":true,\"session\":\"closing\"")<<std::flush;if(opened)dev.close();return 0;}
+-        if(cmd!="status"&&cmd!="capture"){std::cout<<session::error_response(id,"UNKNOWN_COMMAND","unsupported command")<<std::flush;continue;}
++        if(cmd=="close") {
++            bool cleanup_failed=false;
++            std::string cleanup_err;
++            if(opened&&dev.is_open()){
++                for(int ch : owned_pwm){
++                    std::vector<uint8_t> p; std::string pe;
++                    if(session::build_pwm_payload("stop", ch, 0, 0.0, p, pe)){
++                        auto werr = dev.transport().send_command(CommandCode::PWM, p.data(), p.size());
++                        if(!werr){ cleanup_failed=true; cleanup_err=werr.message; }
++                    }
++                }
++            } else if(!owned_pwm.empty()){
++                cleanup_failed=true; cleanup_err="device not open to stop session PWM outputs";
++            }
++            owned_pwm.clear();
++            if(opened)dev.close();
++            if(cleanup_failed){
++                std::cout<<session::error_response(id,"CLEANUP_FAILED","failed to stop session PWM outputs: "+cleanup_err)<<std::flush;
++            } else {
++                std::cout<<session::response(id,"\"ok\":true,\"session\":\"closing\"")<<std::flush;
++            }
++            return 0;
++        }
++        if(cmd!="status"&&cmd!="capture"&&cmd!="pwm"){std::cout<<session::error_response(id,"UNKNOWN_COMMAND","unsupported command")<<std::flush;continue;}
++        if(cmd=="pwm"){
++            std::string op; int output_ch=-1, freq_hz=0; double duty=0.0;
++            if(!session::get_string(req,"op",op)){std::cout<<session::error_response(id,"INVALID_PWM","missing or invalid op")<<std::flush;continue;}
++            if(!session::get_integer(req,"output",output_ch)){std::cout<<session::error_response(id,"INVALID_PWM","missing or invalid output channel")<<std::flush;continue;}
++            if(op=="configure"){
++                if(!session::get_integer(req,"frequency_hz",freq_hz)){std::cout<<session::error_response(id,"INVALID_PWM","missing or invalid frequency_hz")<<std::flush;continue;}
++                if(!session::get_number(req,"duty_percent",duty)){std::cout<<session::error_response(id,"INVALID_PWM","missing or invalid duty_percent")<<std::flush;continue;}
++            } else if(op!="stop"){
++                std::cout<<session::error_response(id,"INVALID_PWM","op must be configure or stop")<<std::flush;continue;
++            }
++            std::vector<uint8_t> payload; std::string payload_err;
++            if(!session::build_pwm_payload(op,output_ch,freq_hz,duty,payload,payload_err)){
++                std::cout<<session::error_response(id,"INVALID_PWM",payload_err)<<std::flush;continue;
++            }
++            if(!opened||!dev.is_open()){
++                auto e=dev.open();if(!e){opened=false;std::cout<<session::error_response(id,"DEVICE_OPEN_FAILED",e.message)<<std::flush;continue;}opened=true;
++            }
++            auto werr = dev.transport().send_command(CommandCode::PWM, payload.data(), payload.size());
++            if(!werr){
++                std::cout<<session::error_response(id,"PWM_COMMAND_FAILED",werr.message)<<std::flush;continue;
++            }
++            if(op=="configure") owned_pwm.insert(output_ch);
++            else owned_pwm.erase(output_ch);
++            std::string p_hex; for(uint8_t b : payload){ char h[3]; snprintf(h,sizeof(h),"%02x",b); p_hex+=h; }
++            std::cout<<session::response(id,"\"ok\":true,\"action\":\""+op+"\",\"output\":"+std::to_string(output_ch)+",\"payload\":\""+p_hex+"\"")<<std::flush;
++            continue;
++        }
+         if(cmd=="status"){
+             if(!opened||!dev.is_open()){
+                 auto e=dev.open();if(!e){opened=false;std::cout<<session::error_response(id,"DEVICE_OPEN_FAILED",e.message)<<std::flush;continue;}opened=true;
+@@ -129,7 +180,22 @@ static int run_session_jsonl(){
+         CaptureEngine engine(dev);auto result=engine.execute_capture(cfg,out,nullptr,timeout);std::string json=session::compact_json(serialize_capture_result_json(result,out));if(!json.empty()&&json.back()=='\n')json.pop_back();
+         std::cout<<session::response(id,"\"ok\":true,\"session\":\"ready\",\"result\":"+json)<<std::flush;
+     }
+-    if(opened)dev.close();return 0;
++    bool eof_cleanup_failed = false;
++    if(opened&&dev.is_open()){
++        for(int ch : owned_pwm){
++            std::vector<uint8_t> p; std::string pe;
++            if(session::build_pwm_payload("stop", ch, 0, 0.0, p, pe)){
++                auto werr = dev.transport().send_command(CommandCode::PWM, p.data(), p.size());
++                if(!werr){ eof_cleanup_failed = true; std::cerr << "EOF PWM stop failed: " << werr.message << std::endl; }
++            }
++        }
++        owned_pwm.clear();
++    } else if(!owned_pwm.empty()){
++        eof_cleanup_failed = true; std::cerr << "EOF PWM stop failed: device not open" << std::endl;
++    }
++    if(opened)dev.close();
++    if(eof_cleanup_failed) return 1;
++    return 0;
+ }
+ 
+ static void print_usage() {
+diff --git a/cli/session_protocol.h b/cli/session_protocol.h
+index 911ead7..09b6b76 100644
+--- a/cli/session_protocol.h
++++ b/cli/session_protocol.h
+@@ -8,6 +8,7 @@
+ #include <map>
+ #include <string>
+ #include <vector>
++#include <cmath>
+ 
+ namespace atkdl16::session {
+ struct Value {
+@@ -97,6 +98,28 @@ inline bool parse_channels(const Value& request, std::vector<uint8_t>& channels)
+ }
+ inline bool get_string(const Value& v,const std::string& k,std::string& s){auto p=get(v,k);if(!p||p->kind!=Value::Kind::String)return false;s=p->scalar;return true;}
+ inline bool get_integer(const Value& v,const std::string& k,int& n){auto p=get(v,k);if(!p||p->kind!=Value::Kind::Number||p->scalar.find_first_of(".eE")!=std::string::npos)return false;try{size_t u=0;long x=std::stol(p->scalar,&u);if(u!=p->scalar.size()||x<std::numeric_limits<int>::min()||x>std::numeric_limits<int>::max())return false;n=static_cast<int>(x);return true;}catch(...){return false;}}
++inline bool get_number(const Value& v,const std::string& k,double& d){auto p=get(v,k);if(!p||p->kind!=Value::Kind::Number)return false;try{size_t u=0;d=std::stod(p->scalar,&u);return u==p->scalar.size()&&std::isfinite(d);}catch(...){return false;}}
++inline bool build_pwm_payload(const std::string& op, int output_ch, int freq_hz, double duty_pct, std::vector<uint8_t>& out, std::string& err) {
++    if(output_ch != 0 && output_ch != 1){ err = "output must be 0 or 1"; return false; }
++    if(op == "configure") {
++        if(freq_hz < 1 || freq_hz > 20000000){ err = "frequency_hz must be in [1, 20000000]"; return false; }
++        if(!std::isfinite(duty_pct) || duty_pct < 0.0 || duty_pct > 100.0){ err = "duty_percent must be finite in [0, 100]"; return false; }
++        constexpr uint64_t PWM_COUNTER_HZ = 200000000ULL;
++        uint32_t period = static_cast<uint32_t>(std::floor(PWM_COUNTER_HZ / static_cast<double>(freq_hz) + 0.5));
++        uint32_t dcount = static_cast<uint32_t>(std::floor(period * duty_pct / 100.0 + 0.5));
++        out.clear();
++        out.push_back(static_cast<uint8_t>((output_ch << 4) + 0x11));
++        for(int i=0; i<4; ++i) out.push_back(static_cast<uint8_t>((period >> (8*i)) & 0xFF));
++        for(int i=0; i<4; ++i) out.push_back(static_cast<uint8_t>((dcount >> (8*i)) & 0xFF));
++        return true;
++    } else if(op == "stop") {
++        out.clear();
++        out.push_back(static_cast<uint8_t>((output_ch + 1) << 4));
++        return true;
++    }
++    err = "unknown op: " + op;
++    return false;
++}
+ inline std::string response(const std::string& id,const std::string& fields){return "{\"request_id\":\""+json_escape(id)+"\","+fields+"}\n";}
+ inline std::string error_response(const std::string& id,const std::string& code,const std::string& message){return response(id,"\"ok\":false,\"error_code\":\""+json_escape(code)+"\",\"message\":\""+json_escape(message)+"\"");}
+ inline std::string compact_json(const std::string& input){

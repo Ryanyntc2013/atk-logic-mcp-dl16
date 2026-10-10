@@ -92,6 +92,10 @@ For Cursor, add to `.cursor/mcp.json` or the user's MCP settings, with a **full 
 
 One-shot remains the default. Persistent capture (`DL16_BACKEND_MODE=session`) is experimental and has not passed corrected-channel HIL. Keep the B6 one-shot retry; do not use a cached session status as a fresh FPGA query.
 
+For the validated long-session buffer path, also set `DL16_EXPERIMENTAL_SESSION_LIFECYCLE=depth-stop-v1`. This remains explicit opt-in: default one-shot and its B6 mitigation are unchanged. Same-owner dual-PWM dynamic acceptance passed 20/20 on the recorded Plus firmware baseline; calibrated timing, other models and arbitrary trigger profiles are not certified. Native PWM setup is a bounded JSONL command, not an additional MCP tool. See [TASK-032](docs/tasks/DL16-TASK-032-single-owner-long-session.md).
+
+A failed native capture invalidates and closes the session. The failed capture is never replayed; a later explicit operation creates a new worker. Reusing the same native device after a trigger timeout failed in local testing, so seamless in-session timeout recovery is not promised. Close/owned-PWM cleanup errors are surfaced.
+
 The optional `DL16_SESSION_JOURNAL_DIR` setting enables local, durable request/response evidence for session mode. Use an absolute path in an ignored task evidence directory. Journal files may contain local paths, native responses and signal metadata: retain originals locally and share only separately redacted summaries. Logging is not raw USB capture, calibration, or proof of physical signal provenance.
 
 See [TASK-020 acceptance and hardware gate](docs/tasks/DL16-TASK-020-session-evidence-journal.md) and [TASK-021 bounded corrected-channel smoke](docs/tasks/DL16-TASK-021-corrected-session-smoke.md). Setting logging options does not authorize hardware access; current device connection, safe wiring and voltage must be confirmed before live commands.

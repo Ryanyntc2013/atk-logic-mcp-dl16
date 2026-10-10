@@ -132,6 +132,10 @@ Reviewed helper started PWM0=1kHz/PWM1=2kHz,50percent;20/20 experimental capture
 
 PWM0-only produced CH8~1kHz/50percent in both captures. Reverse setup PWM1->PWM0 yielded CH8=1kHz/50percent and CH14 all-low. Combined with TASK030 forward setup yielding only CH14, waveform follows last configured output under sequential standalone helper opens. Both channels' missing-source observations must not be attributed to capture alone. All4 captures valid,outputs stopped,postflight info passed. Next investigate two-output configuration in one ownership interval. See [TASK-031](tasks/DL16-TASK-031-pwm-order-isolation.md);session remains experimental.
 
+## DL16-TASK-032 — scoped long-session buffer acceptance
+
+Same-owner PWM configuration produced simultaneous CH8=1kHz/50percent and CH14=2kHz/50percent in20/20 captures;final stop-observable binary repeated20/20,all stop transfers reported successful. Fresh postflight info passed. No calibrated timing or generation identity claim. Native trigger timeout followed by same-owner immediate request failed,so MCP adapter now closes/invalidates failed capture and does not replay;later explicit fresh-owner capture passed and postflight ready. Close-owned PWM failures surface. This accepts explicit opt-in buffer long-session normal operation with fail-closed error boundary on this Plus firmware baseline,NOT default promotion/stream/RLE/universal trigger/model certification. See [TASK-032](tasks/DL16-TASK-032-single-owner-long-session.md).
+
 ## Build patches applied to the ignored checkout (reproducible)
 
 All local native changes are one patch: scripts/patches/atk-dl16-local-build.patch, applied

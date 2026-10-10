@@ -62,7 +62,8 @@ def _session_enabled() -> bool:
 def _get_session(cli: Path) -> NativeSession:
     global _SESSION, _SESSION_PATH
     with _SESSION_LOCK:
-        if _SESSION is not None and _SESSION_PATH == cli:
+        if (_SESSION is not None and _SESSION_PATH == cli
+                and not _SESSION.failed):
             return _SESSION
         if _SESSION is not None:
             _SESSION.close()
@@ -181,6 +182,20 @@ def capture(request: CaptureRequest, timeout_s: float = 45.0,
                 doc["success"] = False
                 doc["error_code"] = "EVIDENCE_INCOMPLETE"
                 doc["message"] = "Capture finished without required integrity markers"
+            if not doc.get("success"):
+                # An incomplete or timed-out acquisition cannot safely reuse device state.
+                session = _get_session(cli)
+                try:
+                    session.close()
+                    doc["session_cleanup"] = "closed"
+                except SessionFailure as cleanup:
+                    doc["session_cleanup"] = {"error_code": cleanup.code, "message": str(cleanup)}
+                with _SESSION_LOCK:
+                    global _SESSION, _SESSION_PATH
+                    if _SESSION is session:
+                        _SESSION = None
+                        _SESSION_PATH = None
+                doc["session_invalidated"] = True
             doc["backend"] = "native-session"
             doc["attempts"] = 1
             doc["retry_log"] = []

@@ -23,12 +23,15 @@ int main() {
     d.wake_flush = flush;
     d.explicit_flush.observe(0, true);
     d.wake_observed = true; d.wake_write_ok = true;
+    r.cleanup_stop_attempted = true;
+    r.cleanup_stop_ok = true;
     r.success=false;
     auto failed=atkdl16::serialize_capture_result_json(r, "");
     r.success=true;
     auto passed=atkdl16::serialize_capture_result_json(r, "");
     if (failed.find("dl16-rx-diagnostics/v1")==std::string::npos
-        || passed.find("samples_before_crop")==std::string::npos) return 3;
+        || passed.find("samples_before_crop")==std::string::npos
+        || passed.find("\"cleanup_stop_ok\": true")==std::string::npos) return 3;
     std::cout << failed << passed;
     return 0;
 }
