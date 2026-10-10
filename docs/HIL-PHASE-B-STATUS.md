@@ -48,6 +48,19 @@ PWM0->CH8, PWM1->CH14 verified 1 kHz/2 kHz.)
 - Tracked patch exposes `--trigger-timeout`; HIL: `ch0:rising` with `--trigger-timeout 3`
   returns `CAPTURE_TIMEOUT` in ~3.7 s (default 30 s).
 
+## DL16-TASK-016 (B-1 phase diagnosis, B-2 gating repeatability)
+
+- B-1 (2 channels, no trigger, PWM0 100 Hz + PWM1 1000 Hz, both 50%): raw bits show CH8 rising edges
+  at samples 200000/400000/600000/800000 and CH14 LOW at all four. The two frequencies are
+  harmonically related, so the phase is fixed. ch8=rising AND ch14=high has 0 matches in the
+  data; ch8=high AND ch14=high has 250000 and ch8=rising AND ch14=low has 4. The search and
+  device AND behave correctly; the earlier ch8:rising,ch14:* timeouts were a phase artifact,
+  not a device fault. Non-harmonic frequencies are still needed to observe a true edge+level overlap.
+- B-2 (ch0:rising, no signal, --trigger-timeout 3, 20 runs): 20/20 CAPTURE_TIMEOUT,
+  elapsed 3.60-3.63 s; device ready before and after.
+- Evidence: rtifacts/hil/DL16-TASK-016/ (ignored) with SHA256SUMS.txt. B-2 per-run values are
+  transcribed from the console output, not from a saved file.
+
 ## Build patches applied to the ignored checkout (reproducible)
 
 All local native changes are one patch: scripts/patches/atk-dl16-local-build.patch, applied
