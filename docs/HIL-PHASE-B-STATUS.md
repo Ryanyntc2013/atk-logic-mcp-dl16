@@ -124,6 +124,10 @@ Following operator restoration/readiness pass, opt-in `depth-stop-v1` processed 
 
 Opt-in depth-stop-v1 completed20 exact CH8/CH14 requests,200000 samples/channel,required markers; independent pre/post info passed. Elapsed0.125..0.438s. Offline bits inspection found both requested channels entirely low with zero transitions in all20 captures, so this is static-input capture validity/repeatability, NOT PWM waveform or timing validation and cannot rule out mixed generations. Full evidence/report [TASK-029](tasks/DL16-TASK-029-bounded-repeatability.md). Session remains experimental; defaults/B6 unchanged.
 
+## DL16-TASK-030 — known PWM decision gate (overall waveform FAILED)
+
+Reviewed helper started PWM0=1kHz/PWM1=2kHz,50percent;20/20 experimental captures valid. CH14 artifacts all measure2kHz/50percent with20 rising edges/window;CH8 is all-low with no expected1kHz. Both stop helper calls succeeded,postflight info passed. Output command success is not proof of sustained physical PWM0. Overall waveform FAIL;do not promote session. Next decision is isolated PWM setup/output persistence diagnosis versus single-owner session PWM interface. Full report [TASK-030](tasks/DL16-TASK-030-known-pwm-decision.md).
+
 ## Build patches applied to the ignored checkout (reproducible)
 
 All local native changes are one patch: scripts/patches/atk-dl16-local-build.patch, applied
