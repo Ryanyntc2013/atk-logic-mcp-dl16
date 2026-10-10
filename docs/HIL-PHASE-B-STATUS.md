@@ -116,6 +116,10 @@ Operator restored the device; fresh readiness passed. With TASK-022 diagnostic C
 
 After operator restoration/readiness pass, both capture requests recorded successful wake writes. Both wake-internal and explicit flushes reached their existing 50-read cap: 102,400 bytes each, no errors, no empty read. First capture passed; second again received `[6,6,6,4,5,5,5,5]` without channel data, zero samples before/after crop. Cap saturation is therefore not sufficient to explain the failure, and flush data content/packet ownership remains unknown. No replay/reset or enlarged drain. See [TASK-026](tasks/DL16-TASK-026-prearm-hil.md). Session remains unaccepted.
 
+## DL16-TASK-028 — experimental depth/stop lifecycle smoke (2/2 capture-valid)
+
+Following operator restoration/readiness pass, opt-in `depth-stop-v1` processed two exact CH8/CH14 requests successfully,200000 samples/channel,required ACK/offset/Complete. Second request still started with three Complete messages before ACK/progress but continued to receive channel data. Session closed and separate postflight info passed. This supports early-Complete termination as a failure mechanism, but grouped wake/flush/completion/stop changes do not establish single-change cause or sample generation provenance. No waveform/source quality check; two captures are not stability certification. Keep one-shot default and session experimental. See [TASK-028](tasks/DL16-TASK-028-experimental-lifecycle-hil.md).
+
 ## Build patches applied to the ignored checkout (reproducible)
 
 All local native changes are one patch: scripts/patches/atk-dl16-local-build.patch, applied
