@@ -18,11 +18,11 @@ discipline unchanged.
 | `capture measure` (frequency/duty) | high | `logic_measure_pwm` | **ADOPTED** |
 | `capture filter` (drop short pulses -> new capture) | medium | **`logic_filter` added now** | **ADOPTED** |
 | `capture search` (multi-channel conditions) | medium | **`logic_search` added now** | **ADOPTED** |
-| `capture export` CSV / edges / VCD (streaming) | high | **`logic_export` (VCD + edges CSV) added now** | **ADOPTED** |
+| `capture export` CSV / edges / VCD (streaming) | high | **`logic_export` VCD + edges + sample CSV now; overwrite-protected** | **ADOPTED** |
 | Native decoders: UART (5–9 bits, parity, stop, invert), SPI modes/bit order | medium | **in-repo `decoders.py` (UART/I2C/SPI) added now**, MCP+CLI wired | **ADOPTED** |
 | sigrok integration (`capture sigrok`) | medium | not present | **PROPOSE / optional** |
 | Capture dir `manifest.json` + `wire.bin` (raw packets) + `channel-NN.bin` | medium | `meta.json` + `chNN.bits` + `edges.json` (raw bits kept; raw USB packets not) | **ADAPT** (consider retaining raw packets) |
-| `--sample-index` default pick, `--force` overwrite protection | low | fixed rate map; new dir per capture | **PROPOSE (minor)** |
+| `--sample-index` default pick, `--force` overwrite protection | low | fixed rate map; new dir per capture | **ADOPTED (overwrite protection)**; sample-index fixed |
 | Silent success output; measurements print only requested values | low | returns JSON | acceptable |
 | `skills/dl16-cli` Codex Skill packaging | medium | none | **PROPOSE** |
 

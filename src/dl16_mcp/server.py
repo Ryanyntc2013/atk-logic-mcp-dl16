@@ -56,20 +56,21 @@ def logic_measure_pwm(capture_id: str, channel: int, atkdl_file: str | None = No
 @mcp.tool()
 def logic_export(capture_id: str, channel: int, fmt: str = "vcd",
                  polarity: str = "rising", atkdl_file: str | None = None,
-                 out_name: str | None = None) -> dict:
-    """Export one channel to a compact VCD or edge CSV file; returns the path, not the bytes.
+                 out_name: str | None = None, overwrite: bool = False) -> dict:
+    """Export one channel as VCD, edge CSV or full sample CSV; returns the path.
 
-    Edge-based output stays bounded for large captures; open the file with sigrok or
-    any waveform viewer. It never adds device or timing certification.
+    Edge-based output stays bounded; sample CSV is capped. Existing files are
+    protected unless overwrite=true.
     """
-    return service.logic_export(capture_id, channel, fmt, polarity, atkdl_file, out_name)
+    return service.logic_export(capture_id, channel, fmt, polarity, atkdl_file, out_name, overwrite)
 
 
 @mcp.tool()
 def logic_filter(capture_id: str, channel: int, min_pulse_samples: int,
-                 atkdl_file: str | None = None, out_name: str | None = None) -> dict:
+                 atkdl_file: str | None = None, out_name: str | None = None,
+                 overwrite: bool = False) -> dict:
     """Write a derived capture with pulses shorter than min_pulse_samples removed."""
-    return service.logic_filter(capture_id, channel, min_pulse_samples, atkdl_file, out_name)
+    return service.logic_filter(capture_id, channel, min_pulse_samples, atkdl_file, out_name, overwrite)
 
 
 @mcp.tool()

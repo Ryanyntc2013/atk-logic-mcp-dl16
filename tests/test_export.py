@@ -47,3 +47,14 @@ def test_logic_export_rejects_traversal_name(monkeypatch, tmp_path):
     _make_capture(tmp_path, "cap_test2", bits, 4)
     r = service.logic_export("cap_test2", 0, "vcd", out_name="../escape.vcd")
     assert r["success"] is False
+
+
+def test_logic_export_overwrite_protection(monkeypatch, tmp_path):
+    monkeypatch.setenv("DL16_DATA_DIR", str(tmp_path))
+    bits = np.packbits(np.array([0, 1, 0, 1], dtype=np.uint8), bitorder="little").tobytes()
+    _make_capture(tmp_path, "cap_ow", bits, 4)
+    assert service.logic_export("cap_ow", 0, "samples")["success"] is True
+    again = service.logic_export("cap_ow", 0, "samples")
+    assert again["success"] is False and "exists" in again["message"]
+    forced = service.logic_export("cap_ow", 0, "samples", overwrite=True)
+    assert forced["success"] is True

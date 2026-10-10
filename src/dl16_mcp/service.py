@@ -7,7 +7,7 @@ from typing import Any
 
 from . import backend
 from .analysis import (glitch_filter, measure_pwm, measure_skew, preview_edges,
-                       search_conditions, to_edges_csv, to_vcd)
+                       search_conditions, to_edges_csv, to_samples_csv, to_vcd)
 from .artifacts import Waveform, load_atkdl, load_capture
 from .config import CAPTURE_ID_RE, CaptureRequest, captures_dir, exports_dir
 from .decoders import decode_i2c, decode_spi, decode_uart
@@ -65,20 +65,24 @@ _EXPORT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 def logic_export(capture_id: str, channel: int, fmt: str = "vcd",
                  polarity: str = "rising", atkdl_file: str | None = None,
-                 out_name: str | None = None) -> dict[str, Any]:
-    """Write a compact VCD or edge CSV of one channel; return the path, not the bytes."""
+                 out_name: str | None = None, overwrite: bool = False) -> dict[str, Any]:
+    """Write a compact VCD / edge CSV / full sample CSV of one channel; return the path."""
     try:
         wave = _load(capture_id, channel, atkdl_file=atkdl_file)
         if fmt == "vcd":
             content, ext = to_vcd(wave), "vcd"
         elif fmt in ("edges", "edges_csv", "csv"):
             content, ext = to_edges_csv(wave, polarity=polarity), "csv"
+        elif fmt == "samples":
+            content, ext = to_samples_csv(wave), "csv"
         else:
-            raise ValueError("fmt must be 'vcd' or 'edges'")
+            raise ValueError("fmt must be 'vcd', 'edges' or 'samples'")
         name = out_name or f"{capture_id}_ch{channel:02d}.{ext}"
         if not _EXPORT_NAME_RE.fullmatch(name):
             raise ValueError("Unsafe export file name")
         path = exports_dir() / name
+        if path.exists() and not overwrite:
+            raise ValueError("Export file exists; pass overwrite=true to replace it")
         path.write_text(content, encoding="utf-8")
         return {"success": True, "format": fmt, "channel": channel,
                 "path": str(path), "bytes": path.stat().st_size,
@@ -106,7 +110,8 @@ def _parse_condition(condition) -> tuple[int, str]:
 
 
 def logic_filter(capture_id: str, channel: int, min_pulse_samples: int,
-                 atkdl_file: str | None = None, out_name: str | None = None) -> dict[str, Any]:
+                 atkdl_file: str | None = None, out_name: str | None = None,
+                 overwrite: bool = False) -> dict[str, Any]:
     """Write a derived capture with pulses shorter than min_pulse_samples removed."""
     try:
         wave = _load(capture_id, channel, atkdl_file=atkdl_file)
@@ -115,6 +120,8 @@ def logic_filter(capture_id: str, channel: int, min_pulse_samples: int,
         if not CAPTURE_ID_RE.fullmatch(new_id):
             raise ValueError("Unsafe derived capture id")
         folder = captures_dir() / new_id
+        if folder.exists() and not overwrite:
+            raise ValueError("Derived capture exists; pass overwrite=true to replace it")
         folder.mkdir(parents=True, exist_ok=True)
         (folder / f"ch{channel:02d}.bits").write_bytes(filtered)
         meta = {

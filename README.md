@@ -109,7 +109,7 @@ For Cursor, add to `.cursor/mcp.json` or the user's MCP settings, with a **full 
 | `logic_inspect` | Offline tested | Preview 1..1000 edges with sample/time indices |
 | `logic_measure_skew` | Offline tested | Signed pairwise delay, P95/P99, missing/extra pulses |
 | `logic_measure_pwm` | Offline tested | Median-period frequency and period jitter |
-| `logic_export` | Offline tested | Edge-based VCD / edge-CSV export of one channel |
+| `logic_export` | Offline tested | VCD / edge-CSV / sample-CSV export of one channel |
 | `logic_filter` | Offline tested | Glitch removal (drop short pulses) into a derived capture |
 | `logic_search` | Offline tested | Sample positions matching multi-channel conditions |
 | `logic_decode` | Offline tested | UART (parity/stop/invert), I2C, SPI (modes 0-3, bit order), in-repo |

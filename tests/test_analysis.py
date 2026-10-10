@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from dl16_mcp.analysis import (AnalysisError, digital_edges, digital_transitions,
                                glitch_filter, measure_pwm, measure_skew, search_conditions,
-                               to_edges_csv, to_vcd)
+                               to_edges_csv, to_samples_csv, to_vcd)
 from dl16_mcp.artifacts import Waveform
 
 
@@ -136,3 +136,18 @@ def test_search_conditions_and_semantics():
     assert r["matches"][0]["sample"] == 2
     assert search_conditions(waves, [(0, "rising"), (1, "low")])["total_matches"] == 0
     assert search_conditions(waves, [(1, "high")])["total_matches"] == 4
+
+
+def test_to_samples_csv_full_and_bounded():
+    w = wave(0, [0, 1, 1, 0], rate=20_000_000)
+    lines = to_samples_csv(w).strip().splitlines()
+    assert lines[0] == "sample,time_ns,level"
+    assert lines[1] == "0,0,0"
+    assert lines[2] == "1,50,1"
+    assert lines[-1] == "3,150,0"
+    try:
+        to_samples_csv(w, max_samples=2)
+    except AnalysisError:
+        pass
+    else:
+        raise AssertionError("expected AnalysisError for oversized sample export")

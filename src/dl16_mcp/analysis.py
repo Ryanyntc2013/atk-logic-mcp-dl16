@@ -238,6 +238,20 @@ def to_edges_csv(wave: Waveform, *, polarity: str = "rising",
     return "\n".join(rows) + "\n"
 
 
+def to_samples_csv(wave: Waveform, *, max_samples: int = 2_000_000) -> str:
+    """CSV of every sample (sample,time_ns,level); bounded by max_samples."""
+    if max_samples < 1:
+        raise AnalysisError("max_samples must be positive")
+    if wave.samples > max_samples:
+        raise AnalysisError(f"Capture has {wave.samples} samples; exceeds sample export limit {max_samples}")
+    bits = np.unpackbits(np.frombuffer(wave.raw, dtype=np.uint8),
+                         bitorder="little")[:wave.samples]
+    ns_per_sample = 1e9 / wave.sample_rate_hz
+    rows = ["sample,time_ns,level"]
+    rows.extend(f"{i},{int(round(i * ns_per_sample))},{int(bit)}" for i, bit in enumerate(bits))
+    return "\n".join(rows) + "\n"
+
+
 def glitch_filter(raw: bytes, sample_count: int, *, min_pulse_samples: int,
                   max_edges: int = 2_000_000) -> tuple[bytes, int]:
     """Return (filtered_bits, removed_pulse_count).
