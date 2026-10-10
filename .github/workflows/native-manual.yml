@@ -1,12 +1,31 @@
-name: Native Windows build (manual; no hardware)
+name: Native Windows build (no hardware)
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/native-manual.yml'
+      - 'scripts/bootstrap-native.ps1'
   workflow_dispatch:
+
 jobs:
   native:
     runs-on: windows-latest
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+      - name: Show build tool versions
+        shell: pwsh
+        run: |
+          cmake --version
+          git --version
+          & "$env:ProgramFiles\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationVersion
       - name: Build pinned upstream C++ and run its unit tests
         shell: pwsh
         run: .\scripts\bootstrap-native.ps1
+      - name: Verify compiled CLI exists
+        shell: pwsh
+        run: |
+          $exe = 'external/ATK-Logic-Mcp/build/Release/atk-dl16.exe'
+          if (-not (Test-Path $exe)) { throw "Expected binary missing: $exe" }
+          & $exe
+          if ($LASTEXITCODE -ne 0) { throw 'CLI smoke test failed' }
