@@ -56,6 +56,11 @@ git -C $Dst apply --check $DiagnosticsPatch
 if ($LASTEXITCODE -ne 0) { throw 'Diagnostics patch check failed' }
 git -C $Dst apply $DiagnosticsPatch
 if ($LASTEXITCODE -ne 0) { throw 'Diagnostics patch apply failed' }
+$PrearmPatch = Join-Path $RepoRoot 'scripts\patches\atk-dl16-prearm.patch'
+git -C $Dst apply --check $PrearmPatch
+if ($LASTEXITCODE -ne 0) { throw 'Prearm telemetry patch check failed' }
+git -C $Dst apply $PrearmPatch
+if ($LASTEXITCODE -ne 0) { throw 'Prearm telemetry patch apply failed' }
 
 if (-not $SkipBuild) {
   # Prefer the requested toolset only when it is actually installed on this machine;

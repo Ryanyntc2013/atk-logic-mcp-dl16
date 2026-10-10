@@ -1,0 +1,96 @@
+diff --git a/core/include/atkdl16/device.h b/core/include/atkdl16/device.h
+index b606bf5..e8067b6 100644
+--- a/core/include/atkdl16/device.h
++++ b/core/include/atkdl16/device.h
+@@ -27,3 +27,3 @@ public:
+     // Reset capture / wake FPGA
+-    Error wake_fpga();
++    Error wake_fpga(CaptureDiagnostics* diagnostics = nullptr);
+     Error sleep_fpga();
+@@ -31,3 +31,3 @@ public:
+     // Flush any pending data in USB FIFOs
+-    Error flush_buffers();
++    Error flush_buffers(FlushObservation* observation = nullptr);
+ 
+diff --git a/core/include/atkdl16/types.h b/core/include/atkdl16/types.h
+index 8de0883..e5939bb 100644
+--- a/core/include/atkdl16/types.h
++++ b/core/include/atkdl16/types.h
+@@ -167,2 +167,14 @@ struct ChannelEdges {
+ 
++struct FlushObservation {
++    uint64_t reads{0}, bytes{0}, errors{0};
++    bool ended_empty{false}, limit_reached{false};
++    std::vector<uint64_t> sizes;
++    void observe(size_t n, bool ok) {
++        ++reads; bytes += n; if (!ok) ++errors;
++        if (sizes.size() < 50) sizes.push_back(n);
++        ended_empty = n == 0;
++        limit_reached = reads == 50 && !ended_empty;
++    }
++};
++
+ // Bounded observations only; counters never control capture behavior.
+@@ -170,2 +182,4 @@ struct CaptureDiagnostics {
+     bool enabled{false};
++    bool wake_write_ok{false}, wake_observed{false};
++    FlushObservation wake_flush, explicit_flush;
+     uint64_t reads{0}, bytes{0}, short_reads{0}, unaligned_bytes{0}, messages{0};
+diff --git a/core/src/capture.cpp b/core/src/capture.cpp
+index 42f6880..0397dca 100644
+--- a/core/src/capture.cpp
++++ b/core/src/capture.cpp
+@@ -65,4 +65,4 @@ CaptureResult CaptureEngine::execute_capture(const CaptureConfig& config,
+     m_state = CaptureState::FlushRx;
+-    m_device.wake_fpga();
+-    m_device.flush_buffers();
++    m_device.wake_fpga(result.diagnostics.enabled ? &result.diagnostics : nullptr);
++    m_device.flush_buffers(result.diagnostics.enabled ? &result.diagnostics.explicit_flush : nullptr);
+ 
+diff --git a/core/src/device.cpp b/core/src/device.cpp
+index 4d1369a..51aa1d7 100644
+--- a/core/src/device.cpp
++++ b/core/src/device.cpp
+@@ -61,3 +61,3 @@ bool Device::is_open() const noexcept {
+ 
+-Error Device::wake_fpga() {
++Error Device::wake_fpga(CaptureDiagnostics* diagnostics) {
+     if (!is_open()) return {ErrorCode::DeviceDisconnected, "Device not open", false, ""};
+@@ -67,4 +67,8 @@ Error Device::wake_fpga() {
+     buf[2] = 0x01; // Active / Awake
+-    m_transport->write_bulk(EP_BULK_OUT, buf, sizeof(buf), 100);
+-    flush_buffers();
++    auto write_result = m_transport->write_bulk(EP_BULK_OUT, buf, sizeof(buf), 100);
++    if (diagnostics) {
++        diagnostics->wake_observed = true;
++        diagnostics->wake_write_ok = static_cast<bool>(write_result);
++    }
++    flush_buffers(diagnostics ? &diagnostics->wake_flush : nullptr);
+     return Error::ok();
+@@ -82,3 +86,3 @@ Error Device::sleep_fpga() {
+ 
+-Error Device::flush_buffers() {
++Error Device::flush_buffers(FlushObservation* observation) {
+     if (!is_open()) return {ErrorCode::DeviceDisconnected, "Device not open", false, ""};
+@@ -88,3 +92,4 @@ Error Device::flush_buffers() {
+     while (tries++ < 50) {
+-        m_transport->read_bulk(EP_BULK_IN, dump.data(), dump.size(), actual, 5);
++        auto read_result = m_transport->read_bulk(EP_BULK_IN, dump.data(), dump.size(), actual, 5);
++        if (observation) observation->observe(actual, static_cast<bool>(read_result));
+         if (actual == 0) {
+diff --git a/core/src/json_util.cpp b/core/src/json_util.cpp
+index ece2bb5..0769304 100644
+--- a/core/src/json_util.cpp
++++ b/core/src/json_util.cpp
+@@ -48,2 +48,11 @@ static std::string diagnostic_json(const CaptureDiagnostics& d) {
+         };
++        auto flush = [&](const char* name, const FlushObservation& f) {
++            s << ",\"" << name << "\":{\"reads\":" << f.reads << ",\"bytes\":" << f.bytes
++              << ",\"errors\":" << f.errors << ",\"ended_empty\":" << (f.ended_empty ? "true":"false")
++              << ",\"limit_reached\":" << (f.limit_reached ? "true":"false") << ",\"sizes\":[";
++            for(size_t i=0;i<f.sizes.size();++i){if(i)s<<",";s<<f.sizes[i];} s << "]}";
++        };
++        s << ",\"wake_observed\":" << (d.wake_observed ? "true":"false")
++          << ",\"wake_write_ok\":" << (d.wake_write_ok ? "true":"false");
++        flush("wake_flush", d.wake_flush); flush("explicit_flush", d.explicit_flush);
+         counts("order_counts",d.orders); counts("samples_before_crop",d.before_crop);

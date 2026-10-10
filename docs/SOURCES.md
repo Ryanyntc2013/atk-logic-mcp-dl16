@@ -38,6 +38,10 @@ The optional session journal is independently implemented host-side JSONL loggin
 
 The diagnostics patch independently instruments the pinned CPP capture path and serializer without changing receive termination, USB recovery or crop behavior. Candidate stale-Complete, crop-clearing and short-response explanations remain hypotheses; neither TASK-021 timing nor the 512-byte zero MCU reply proves them. LHX lifecycle observations remain source evidence only and no LHX code was copied or translated. See [TASK-022](tasks/DL16-TASK-022-bounded-native-rx-diagnostics.md).
 
+## Pre-arm observations (DL16-TASK-025)
+
+The additive pre-arm patch observes the pinned CPP wake write and its existing internal flush, followed by the existing explicit capture flush. No upstream timing, limits, return behavior or protocol sequence was replaced. Flush timeout/empty results and error counters do not prove endpoint emptiness or packet generation ownership. Independent implementation and acceptance: [TASK-025](tasks/DL16-TASK-025-prearm-telemetry.md); no LHX source copied.
+
 ## License hygiene
 
 - Keep provenance, git commit IDs and third-party NOTICE when embedding source in the future.

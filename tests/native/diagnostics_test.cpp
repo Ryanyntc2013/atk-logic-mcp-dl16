@@ -12,6 +12,17 @@ int main() {
     d.before_crop[8]=200000; d.after_crop[8]=0; d.offsets[8]=200000;
     if (d.reads!=2 || d.bytes!=4608 || d.short_reads!=1 || d.unaligned_bytes!=512
         || d.messages!=100 || d.first_orders.size()!=32 || d.orders[6]!=100) return 2;
+    atkdl16::FlushObservation capped;
+    for (unsigned i=0;i<60;++i) capped.observe(2048, true);
+    if (capped.sizes.size()!=50 || capped.bytes!=122880 || capped.errors) return 4;
+    atkdl16::FlushObservation flush;
+    for (unsigned i=0;i<50;++i) flush.observe(2048, true);
+    if (!flush.limit_reached || flush.ended_empty) return 5;
+    flush.observe(0, false);
+    if (!flush.ended_empty || flush.limit_reached || flush.errors!=1) return 6;
+    d.wake_flush = flush;
+    d.explicit_flush.observe(0, true);
+    d.wake_observed = true; d.wake_write_ok = true;
     r.success=false;
     auto failed=atkdl16::serialize_capture_result_json(r, "");
     r.success=true;
