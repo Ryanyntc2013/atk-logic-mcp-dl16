@@ -95,6 +95,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional explicit path to atk-dl16 executable",
     )
+    parser.add_argument("--requests", type=int, choices=range(2, 21), default=2,
+                        help="Explicit bounded block size, 2..20 (default: two-request smoke)")
     parser.add_argument(
         "--timeout",
         type=float,
@@ -246,13 +248,17 @@ def execute_session_smoke(
     cli_path: Path | None = None,
     timeout_s: float = 45.0,
     session_factory: Callable[[Path], NativeSession] | None = None,
+    requests: int = 2,
 ) -> dict[str, Any]:
     """Execute dry-run or live bounded two-request session smoke."""
+    if isinstance(requests, bool) or not isinstance(requests, int) or not 2 <= requests <= 20:
+        raise ValueError("requests must be an integer from 2 to 20")
     taskdir = Path(taskdir).resolve()
 
     plan = {
         "task": "DL16-TASK-021",
-        "scope": "bounded two-request session smoke",
+        "scope": "bounded session block",
+        "requested_block_size": requests,
         "channels": TARGET_CHANNELS,
         "sample_rate_hz": TARGET_SAMPLE_RATE_HZ,
         "duration_ms": TARGET_DURATION_MS,
@@ -380,8 +386,8 @@ def execute_session_smoke(
             bundle["verdict"] = "SESSION_INIT_FAILED"
 
         if not session_construction_error and session is not None:
-            # We execute up to two capture requests in this single session
-            for step_idx in (1, 2):
+            # A single owned session; never exceed the explicit block size.
+            for step_idx in range(1, requests + 1):
                 step_file = run_dir / f"step_{step_idx}.json"
                 step_record: dict[str, Any] = {
                     "step": step_idx,
@@ -422,14 +428,14 @@ def execute_session_smoke(
                         step_record["status"] = "NATIVE_COMMAND_FAILED"
                         step_record["error"] = raw_response.get("message", "unknown error")
                         bundle["steps"].append(step_record)
-                        bundle["verdict"] = "FIRST_REQUEST_FAILED" if step_idx == 1 else "SECOND_REQUEST_FAILED"
+                        bundle["verdict"] = "FIRST_REQUEST_FAILED" if step_idx == 1 else "SECOND_REQUEST_FAILED" if step_idx == 2 else "REQUEST_FAILED"
                     else:
                         res = raw_response.get("result")
                         if not isinstance(res, dict):
                             step_record["status"] = "MALFORMED_RESULT"
                             step_record["error"] = "Response 'result' is not a dictionary"
                             bundle["steps"].append(step_record)
-                            bundle["verdict"] = "FIRST_REQUEST_FAILED" if step_idx == 1 else "SECOND_REQUEST_FAILED"
+                            bundle["verdict"] = "FIRST_REQUEST_FAILED" if step_idx == 1 else "SECOND_REQUEST_FAILED" if step_idx == 2 else "REQUEST_FAILED"
                         else:
                             # Locate saved capture metadata
                             capture_id = res.get("capture_id")
@@ -459,7 +465,7 @@ def execute_session_smoke(
                                 step_record["status"] = "CAPTURE_CRITERIA_MISMATCH"
                                 step_record["reasons"] = validity["reasons"]
                                 bundle["steps"].append(step_record)
-                                bundle["verdict"] = "FIRST_REQUEST_FAILED" if step_idx == 1 else "SECOND_REQUEST_FAILED"
+                                bundle["verdict"] = "FIRST_REQUEST_FAILED" if step_idx == 1 else "SECOND_REQUEST_FAILED" if step_idx == 2 else "REQUEST_FAILED"
                             else:
                                 step_record["status"] = "STEP_SUCCESS"
                                 bundle["steps"].append(step_record)
@@ -470,12 +476,12 @@ def execute_session_smoke(
                     step_record["message"] = str(exc)
                     step_record["diagnostics"] = getattr(exc, "diagnostics", None)
                     bundle["steps"].append(step_record)
-                    bundle["verdict"] = "FIRST_REQUEST_FAILED" if step_idx == 1 else "SECOND_REQUEST_FAILED"
+                    bundle["verdict"] = "FIRST_REQUEST_FAILED" if step_idx == 1 else "SECOND_REQUEST_FAILED" if step_idx == 2 else "REQUEST_FAILED"
                 except Exception as exc:
                     step_record["status"] = "UNEXPECTED_EXCEPTION"
                     step_record["message"] = str(exc)
                     bundle["steps"].append(step_record)
-                    bundle["verdict"] = "FIRST_REQUEST_FAILED" if step_idx == 1 else "SECOND_REQUEST_FAILED"
+                    bundle["verdict"] = "FIRST_REQUEST_FAILED" if step_idx == 1 else "SECOND_REQUEST_FAILED" if step_idx == 2 else "REQUEST_FAILED"
 
                 # CRITICAL: Durable write AFTER completion/error
                 try:
@@ -491,10 +497,10 @@ def execute_session_smoke(
                     break
 
             # Check overall verdict after loop
-            if len(bundle["steps"]) == 2 and all(s.get("status") == "STEP_SUCCESS" for s in bundle["steps"]):
+            if len(bundle["steps"]) == requests and all(s.get("status") == "STEP_SUCCESS" for s in bundle["steps"]):
                 bundle["verdict"] = "CAPTURE_VALIDITY_PASS"
                 bundle["notes"] = (
-                    "Both requests satisfied exact channel and sample count criteria with complete ACK integrity. "
+                    "All requested captures satisfied exact channel and sample count criteria with complete ACK integrity. "
                     "Waveform contents were NOT evaluated and physical provenance is uncertified."
                 )
 
@@ -548,6 +554,7 @@ def main(argv: list[str] | None = None) -> int:
         source_declaration=args.source_declaration,
         cli_path=args.cli_path,
         timeout_s=args.timeout,
+        requests=args.requests,
     )
 
     print(json.dumps(result, indent=2, ensure_ascii=False))

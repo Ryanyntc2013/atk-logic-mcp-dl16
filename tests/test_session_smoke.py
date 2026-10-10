@@ -497,3 +497,21 @@ def test_cleanup_always_executed_and_environment_restored(tmp_path):
             os.environ.pop("DL16_SESSION_JOURNAL_DIR", None)
         else:
             os.environ["DL16_SESSION_JOURNAL_DIR"] = orig_env
+
+
+@pytest.mark.parametrize("mode,expected", [("ok", 20), ("fail_second", 2)])
+def test_bounded_repeatability_and_stop_on_error(tmp_path, mode, expected):
+    res = smoke.execute_session_smoke(
+        taskdir=tmp_path, live=True, confirm_connected=True,
+        confirm_wiring=True, confirm_voltage=True, confirm_signal_configured=True,
+        source_declaration="synthetic mock", cli_path=Path(sys.executable),
+        session_factory=make_mock_session_factory(mode), requests=20,
+    )
+    assert len(res["steps"]) == expected
+    assert res["verdict"] == ("CAPTURE_VALIDITY_PASS" if mode == "ok" else "SECOND_REQUEST_FAILED")
+
+
+@pytest.mark.parametrize("count", [0, 1, 21, True, 2.5])
+def test_invalid_block_size_rejected_without_launch(tmp_path, count):
+    with pytest.raises(ValueError, match="requests"):
+        smoke.execute_session_smoke(tmp_path, False, False, False, False, False, requests=count)

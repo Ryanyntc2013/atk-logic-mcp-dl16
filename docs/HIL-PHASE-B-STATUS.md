@@ -120,6 +120,10 @@ After operator restoration/readiness pass, both capture requests recorded succes
 
 Following operator restoration/readiness pass, opt-in `depth-stop-v1` processed two exact CH8/CH14 requests successfully,200000 samples/channel,required ACK/offset/Complete. Second request still started with three Complete messages before ACK/progress but continued to receive channel data. Session closed and separate postflight info passed. This supports early-Complete termination as a failure mechanism, but grouped wake/flush/completion/stop changes do not establish single-change cause or sample generation provenance. No waveform/source quality check; two captures are not stability certification. Keep one-shot default and session experimental. See [TASK-028](tasks/DL16-TASK-028-experimental-lifecycle-hil.md).
 
+## DL16-TASK-029 — experimental static-input repeatability (20/20)
+
+Opt-in depth-stop-v1 completed20 exact CH8/CH14 requests,200000 samples/channel,required markers; independent pre/post info passed. Elapsed0.125..0.438s. Offline bits inspection found both requested channels entirely low with zero transitions in all20 captures, so this is static-input capture validity/repeatability, NOT PWM waveform or timing validation and cannot rule out mixed generations. Full evidence/report [TASK-029](tasks/DL16-TASK-029-bounded-repeatability.md). Session remains experimental; defaults/B6 unchanged.
+
 ## Build patches applied to the ignored checkout (reproducible)
 
 All local native changes are one patch: scripts/patches/atk-dl16-local-build.patch, applied
