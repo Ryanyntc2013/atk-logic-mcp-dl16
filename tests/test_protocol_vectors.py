@@ -35,6 +35,7 @@ MATRIX = {
     "rate_mapping": ("DIFF", "CPP 25M=7/500M=13 vs LHX 500M=0 and index-7 no-data report"),
     "rx_packets": ("AGREE", "0A order lenLE16 payload 00 0B; boundary independent of USB chunks"),
     "rle_and_tails": ("AGREE", "(count,value) pairs; extra post-depth bytes never counted as samples"),
+    "end_to_end_crop_align": ("AGREE", "order-3 crop removes only alignment padding; depth preserved"),
     "short_reply_policy": ("AGREE", "512B short reply is not fed to the 2048B 4-lane interleave"),
     "unknown_rate_fallback": ("DIFF", "CPP silently defaults an unknown rate to 20 MHz index 6"),
     "device_info_usb_ids": ("DIFF", "primary 1A86:FFCC; LHX also lists 1A86:6A6B and 04B4:6A6A"),
@@ -46,8 +47,8 @@ def test_matrix_labels_are_from_known_set():
     assert set(MATRIX) == {
         "crc_vector", "tx_framing", "bank_transform", "trigger_nibble",
         "trigger_payload_length", "parameter_payload", "rate_mapping",
-        "rx_packets", "rle_and_tails", "short_reply_policy", "unknown_rate_fallback",
-        "device_info_usb_ids", "trigger_gating_alignment",
+        "rx_packets", "rle_and_tails", "end_to_end_crop_align", "short_reply_policy",
+        "unknown_rate_fallback", "device_info_usb_ids", "trigger_gating_alignment",
     }
     for status, _note in MATRIX.values():
         assert status in {"AGREE", "DIFF", "UNKNOWN"}
@@ -398,3 +399,84 @@ def test_native_cpp_matches_python_reference():
     assert h["parameter_payload"] == ref.parameter_payload(True, False, 1.6, 6, 400000, 36000).hex()
     assert h["bank_transform_hex"] == ref.convert_to_device(bytes(range(256)) * 8).hex()
     assert h["get_device_data_frame_hex"] == ref.build_device_frame(0x10).hex()
+
+    # RX reassembly + order-3 parse must match the Python parser.
+    stream = (
+        ref.build_rx_frame(1, bytes([2, 0, 0xAA, 0xBB]))
+        + ref.build_rx_frame(3, ref.order3_payload(800, {0: 128, 1: 128}, rle_flags=0x01))
+        + ref.build_rx_frame(4, bytes([0, 0, ref.CMD_SIMPLE_TRIGGER, 3]))
+        + ref.build_rx_frame(6, b"")
+    )
+    py = ref.RxParser()
+    py.push_bytes(stream)
+    assert h["rx_orders"] == [m.order for m in py.messages]
+    assert h["rx_desync"] == 0
+    trig = ref.parse_trigger_offset(next(m for m in py.messages if m.order == 3), is_rle=True)
+    assert h["rx_trigger_offset"] == trig["trigger_sample_offset"]
+    assert h["rx_counts_first2"] == trig["channel_byte_counts"][:2]
+    assert h["rx_exceed_capacity"] is True
+
+
+# --------------------------------------------- end-to-end crop / align pipeline
+
+
+def _order1_frames(channel, chunks):
+    return [ref.build_rx_frame(1, bytes([channel, 0x00]) + chunk) for chunk in chunks]
+
+
+def test_end_to_end_crop_removes_only_alignment_padding():
+    cfg = ref.SimConfig((0, 1), sample_rate=1_000_000, duration_ms=1, position_percent=20.0)
+    assert cfg.total_samples() == 1000 and cfg.trigger_sample_index() == 200
+    ch_data = {
+        0: bytes((i * 3) & 0xFF for i in range(128)),
+        1: bytes((i * 5 + 1) & 0xFF for i in range(128)),
+    }
+    frames = b""
+    frames += b"".join(_order1_frames(0, [ch_data[0][:60], ch_data[0][60:]]))
+    frames += b"".join(_order1_frames(1, [ch_data[1][:64], ch_data[1][64:]]))
+    frames += ref.build_rx_frame(3, ref.order3_payload(800, {0: 128, 1: 128}))
+    frames += ref.build_rx_frame(4, bytes([0, 0, ref.CMD_SIMPLE_TRIGGER, 3]))
+    frames += ref.build_rx_frame(6, b"")
+
+    res = ref.simulate_capture(frames, cfg)
+    assert res.ack_ok and res.complete
+    assert res.trigger_offset == 800
+    assert res.channel_start_offsets == {0: 24, 1: 24}  # only the 2048B padding is cropped
+    for ch in (0, 1):
+        assert res.stores[ch].sample_count == 1000
+        assert len(res.stores[ch].data) == 125
+    assert res.warnings == []
+
+
+def test_end_to_end_no_crop_when_counts_equal_depth():
+    cfg = ref.SimConfig((0,), sample_rate=1_000_000, duration_ms=1, position_percent=20.0)
+    data = bytes((i * 7) & 0xFF for i in range(125))
+    frames = ref.build_rx_frame(1, bytes([0, 0]) + data)
+    frames += ref.build_rx_frame(3, ref.order3_payload(800, {0: 125}))
+    frames += ref.build_rx_frame(4, bytes([0, 0, ref.CMD_SIMPLE_TRIGGER, 3]))
+    frames += ref.build_rx_frame(6, b"")
+    res = ref.simulate_capture(frames, cfg)
+    assert res.channel_start_offsets == {}
+    assert res.stores[0].sample_count == 1000
+    assert res.warnings == []
+
+
+def test_end_to_end_incomplete_channel_is_flagged():
+    cfg = ref.SimConfig((0, 1), sample_rate=1_000_000, duration_ms=1, position_percent=20.0)
+    frames = ref.build_rx_frame(1, bytes([0, 0]) + bytes(125))  # ch0 full
+    frames += ref.build_rx_frame(1, bytes([1, 0]) + bytes(10))  # ch1 short
+    frames += ref.build_rx_frame(4, bytes([0, 0, ref.CMD_SIMPLE_TRIGGER, 3]))
+    frames += ref.build_rx_frame(6, b"")
+    res = ref.simulate_capture(frames, cfg)
+    assert res.stores[0].sample_count == 1000
+    assert res.stores[1].sample_count == 80
+    assert any("channel 1 incomplete" in w for w in res.warnings)
+
+
+def test_order3_payload_roundtrip_and_rle_flags():
+    payload = ref.order3_payload(800, {0: 128, 1: 128}, rle_flags=0x01)
+    parsed = ref.parse_trigger_offset(ref.RxMessage(3, payload), is_rle=True)
+    assert parsed["trigger_sample_offset"] == 800
+    assert parsed["channel_byte_counts"][:2] == [128, 128]
+    assert parsed["exceed_capacity"] is True
+    assert parsed["exceed_bandwidth"] is False

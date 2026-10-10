@@ -99,10 +99,10 @@ Next: <single suggested DL16-TASK-003 scope>
 
 Phase A is implemented and passing offline. Independent reference codec:
 `tests/protocol_reference.py`; versioned vectors: `tests/test_protocol_vectors.py`
-(34 tests) plus a hash-locked `tests/vectors/dl16_protocol_vectors.json` and an
+(38 tests) plus a hash-locked `tests/vectors/dl16_protocol_vectors.json` and an
 optional native harness (`scripts/build-vector-harness.ps1`) that proves the pinned
-C++ backend matches the reference byte-for-byte. Full Python suite: **51 passed**.
-Discrepancy matrix and preserved divergences:
+C++ backend matches the reference byte-for-byte (frames and RX parsing). Full Python
+suite: **55 passed**. Discrepancy matrix and preserved divergences:
 `docs/research/DL16-TASK-002-phase-a-protocol-vectors.md`.
 
 - CRC, TX framing, 2048B bank transform, trigger nibble, parameter payload, RX

@@ -431,3 +431,97 @@ def channel_start_offset(channel_byte_count: int, target_samples: int,
     if total_bits > target_samples and total_bits > (trigger_depth + trigger_offset):
         return total_bits - trigger_depth - trigger_offset
     return None
+
+
+# ------------------------------------------------- end-to-end capture pipeline
+
+
+@dataclass
+class SimConfig:
+    enabled_channels: tuple[int, ...] = (0, 1)
+    sample_rate: int = 1_000_000
+    duration_ms: int = 1
+    position_percent: float = 20.0
+    enable_rle: bool = False
+
+    def total_samples(self) -> int:
+        return (self.sample_rate // 1000) * self.duration_ms
+
+    def trigger_sample_index(self) -> int:
+        return int(self.total_samples() * (self.position_percent / 100.0))
+
+
+@dataclass
+class SimResult:
+    stores: dict
+    trigger_offset: int | None
+    channel_start_offsets: dict
+    ack_ok: bool
+    complete: bool
+    warnings: list
+
+
+def simulate_capture(rx_bytes: bytes, config: SimConfig) -> SimResult:
+    """Replay the pure parts of capture.cpp over a synthetic PC-order RX stream.
+
+    Handles order 1 (channel data), order 3 (trigger offset + per-channel byte
+    counts + crop decision), order 4 (SimpleTrigger ACK) and order 6 (complete).
+    """
+    parser = RxParser()
+    parser.push_bytes(rx_bytes)
+    stores = {ch: ChannelStore() for ch in config.enabled_channels}
+    start_offsets: dict[int, int] = {}
+    trigger_offset: int | None = None
+    ack_ok = False
+    complete = False
+    warnings: list[str] = []
+    target = config.total_samples()
+    trig_depth = config.trigger_sample_index()
+    is_rle = config.enable_rle
+
+    for msg in parser.messages:
+        if msg.order == 1:
+            parsed = parse_channel_data(msg, is_rle)
+            if parsed:
+                ch, data = parsed
+                if ch in stores:
+                    stores[ch].data += data
+                    stores[ch].sample_count += len(data) * 8
+        elif msg.order == 3:
+            t = parse_trigger_offset(msg, TOTAL_CHANNELS, is_rle)
+            if t:
+                trigger_offset = t["trigger_sample_offset"]
+                for i, count in enumerate(t["channel_byte_counts"]):
+                    off = channel_start_offset(count, target, trig_depth, trigger_offset)
+                    if off is not None:
+                        start_offsets[i] = off
+        elif msg.order == 4:
+            a = parse_ack(msg)
+            if a and a["command_code"] == CMD_SIMPLE_TRIGGER and a["status"] == 3:
+                ack_ok = True
+            elif a:
+                warnings.append(f"trigger ACK rejected status {a['status']}")
+        elif msg.order == 6:
+            complete = True
+
+    for ch, off in start_offsets.items():
+        if ch in stores:
+            apply_start_offset(stores[ch], off)
+    for ch in config.enabled_channels:
+        finalize_samples(stores[ch], target)
+        if stores[ch].sample_count < target:
+            warnings.append(f"channel {ch} incomplete: {stores[ch].sample_count}/{target}")
+
+    return SimResult(stores, trigger_offset, start_offsets, ack_ok, complete, warnings)
+
+
+def order3_payload(trigger_sample_offset: int, channel_byte_counts: dict[int, int],
+                   rle_flags: int | None = None) -> bytes:
+    payload = bytearray([0, 0])
+    payload += trigger_sample_offset.to_bytes(5, "little")
+    for i in range(TOTAL_CHANNELS):
+        payload += channel_byte_counts.get(i, 0).to_bytes(5, "little")
+    if rle_flags is not None:
+        payload.append(rle_flags)
+    return bytes(payload)
+
