@@ -61,6 +61,18 @@ PWM0->CH8, PWM1->CH14 verified 1 kHz/2 kHz.)
 - Evidence: rtifacts/hil/DL16-TASK-016/ (ignored) with SHA256SUMS.txt. B-2 per-run values are
   transcribed from the console output, not from a saved file.
 
+## DL16-TASK-017 (B-1b, non-harmonic multi-channel AND)
+
+- PWM0 100 Hz and PWM1 1007 Hz (both 50%), CH8+CH14, no trigger, 50 ms, complete (1,000,000 samples/channel).
+- Search on the raw capture: `ch8=rising AND ch14=high` 3, `ch8=rising AND ch14=low` 2, `ch8=falling AND ch14=high` 4.
+  A raw bit check agrees (3 of 5 CH8 rising edges have CH14 high). A real edge+level overlap now exists.
+- Device gating: `--trigger "ch8:rising,ch14:high" --trigger-timeout 3` returned `success=true`,
+  `COMPLETE`, `trigger_ack=true`. The first matching sample is 100000 (10% of total, the default
+  pre-trigger position). The result JSON does not expose the trigger offset, so this is inferred from the sample index.
+- Conclusion: the multi-channel AND trigger works on hardware for an edge+level condition with
+  non-harmonic PWM. The earlier 100 Hz/1 kHz timeouts were a phase artifact.
+- Evidence: `artifacts/hil/DL16-TASK-017/` (ignored) with SHA256SUMS.txt. PWM outputs were stopped; device ready after.
+
 ## Build patches applied to the ignored checkout (reproducible)
 
 All local native changes are one patch: scripts/patches/atk-dl16-local-build.patch, applied
