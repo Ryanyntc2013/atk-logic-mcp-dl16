@@ -99,8 +99,9 @@ Next: <single suggested DL16-TASK-003 scope>
 
 Phase A is implemented and passing offline. Independent reference codec:
 `tests/protocol_reference.py`; versioned vectors: `tests/test_protocol_vectors.py`
-(28 tests). Full Python suite: **45 passed**. Discrepancy matrix and preserved
-divergences: `docs/research/DL16-TASK-002-phase-a-protocol-vectors.md`.
+(33 tests) plus a hash-locked `tests/vectors/dl16_protocol_vectors.json`. Full Python
+suite: **50 passed**. Discrepancy matrix and preserved divergences:
+`docs/research/DL16-TASK-002-phase-a-protocol-vectors.md`.
 
 - CRC, TX framing, 2048B bank transform, trigger nibble, parameter payload, RX
   reassembly and RLE/tail vectors **AGREE** across documented sources.

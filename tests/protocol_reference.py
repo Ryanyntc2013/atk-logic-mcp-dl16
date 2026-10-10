@@ -155,6 +155,23 @@ def code_to_sample_rate(code: int) -> int:
     return CPP_CODE_TO_RATE.get(code, 0)
 
 
+def cpp_rate_code_or_default(rate_hz: int, default: int = 6) -> int:
+    """Mirror CPP build_parameter_setting_frame(): unknown rate silently falls back to 20 MHz.
+
+    Documented here as a known behavior/risk, not an endorsement (see research R1 note).
+    """
+    code = sample_rate_to_code(rate_hz)
+    return code if code else default
+
+
+def interleave_prefix_len(actual_len: int) -> int:
+    """capture.cpp policy: only whole 2048B blocks are bank-deinterleaved.
+
+    A short MCU/FPGA reply (e.g. 512B) is never passed through the 4-lane transform.
+    """
+    return (actual_len // USB_BLOCK_SIZE) * USB_BLOCK_SIZE
+
+
 def _append_uint_le(buf: bytearray, value: int, num_bytes: int) -> None:
     for i in range(num_bytes):
         buf.append((value >> (i * 8)) & 0xFF)

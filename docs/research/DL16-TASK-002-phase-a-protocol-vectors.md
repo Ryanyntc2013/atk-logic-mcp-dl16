@@ -3,7 +3,7 @@
 **Date:** 2026-10-10
 **Status:** Phase A implemented (offline, no hardware). Phase B live gates remain `HIL_NOT_RUN`.
 **Reference implementation:** `tests/protocol_reference.py` (independent Python codec).
-**Vectors:** `tests/test_protocol_vectors.py` (28 tests). Full suite: 45 passed.
+**Vectors:** `tests/test_protocol_vectors.py` (33 tests) + `tests/vectors/dl16_protocol_vectors.json`. Full suite: 50 passed.
 
 Sources are pinned as in
 [`LHX369963-dl16-cli-cross-validation-2026-10-10.md`](LHX369963-dl16-cli-cross-validation-2026-10-10.md):
@@ -24,6 +24,11 @@ LHX `LHX369963/dl16-cli@8d7c209c1e3b13923620bb34cec915291a749612`.
 | Rate mapping | **DIFF** | CPP `20M=6,25M=7,250M=12,500M=13`; LHX reports index 7 no-data and `500M=0` | `test_cpp_rate_mapping_common_vectors`, `test_rate_mapping_conflict_is_preserved` |
 | RX packets | **AGREE** | `0A order lenLE16 payload 00 0B`; reassembled across arbitrary chunk boundaries; bad footer de-syncs and recovers | `test_rx_parser_*`, `test_parse_ack_simple_trigger_status`, `test_parse_trigger_offset_channel_byte_counts` |
 | RLE and tails | **AGREE** | `(count,value)` pairs; overflow guarded; malformed odd length rejected; extra post-depth bytes never counted as samples | `test_rle_*`, `test_finalize_samples_*`, `test_apply_start_offset_byte_and_subbyte`, `test_order3_crop_decision` |
+| Short-reply policy | **AGREE** | a 512B / partial reply is not fed to the 2048B 4-lane interleave (`interleave_prefix_len`) | `test_short_512b_reply_not_interleaved` |
+| Multi-URB reassembly | **AGREE** | RX frames reassembled across 2048B bulk-transfer boundaries | `test_multi_urb_reassembly_across_2048_blocks` |
+| Unknown rate fallback | **DIFF** | CPP silently defaults an unknown rate to 20 MHz index 6 (documented risk, not endorsed) | `test_unknown_rate_falls_back_to_20mhz_in_cpp` |
+| RLE channel data + tail | **AGREE** | order-1 RLE expands then trims to requested depth; extra bytes never counted | `test_rle_channel_data_then_finalize_preserves_depth` |
+| Golden artifact | **AGREE** | language-neutral `tests/vectors/dl16_protocol_vectors.json`, hash-locked | `test_golden_vectors_match_artifact` |
 | Device/USB identity | **DIFF** | primary `1A86:FFCC`; LHX additionally accepts `1A86:6A6B`, `04B4:6A6A` (not merged) | matrix-only |
 | Trigger gating / alignment | **UNKNOWN** | requires a physical edge plus independent timing; `HIL_REQUIRED` | Phase B |
 

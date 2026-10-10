@@ -9,6 +9,8 @@ disagreements stay visible instead of being silently reconciled.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import pathlib
 import struct
 import sys
@@ -31,6 +33,8 @@ MATRIX = {
     "rate_mapping": ("DIFF", "CPP 25M=7/500M=13 vs LHX 500M=0 and index-7 no-data report"),
     "rx_packets": ("AGREE", "0A order lenLE16 payload 00 0B; boundary independent of USB chunks"),
     "rle_and_tails": ("AGREE", "(count,value) pairs; extra post-depth bytes never counted as samples"),
+    "short_reply_policy": ("AGREE", "512B short reply is not fed to the 2048B 4-lane interleave"),
+    "unknown_rate_fallback": ("DIFF", "CPP silently defaults an unknown rate to 20 MHz index 6"),
     "device_info_usb_ids": ("DIFF", "primary 1A86:FFCC; LHX also lists 1A86:6A6B and 04B4:6A6A"),
     "trigger_gating_alignment": ("UNKNOWN", "requires physical edge + independent timing; HIL_REQUIRED"),
 }
@@ -40,8 +44,8 @@ def test_matrix_labels_are_from_known_set():
     assert set(MATRIX) == {
         "crc_vector", "tx_framing", "bank_transform", "trigger_nibble",
         "trigger_payload_length", "parameter_payload", "rate_mapping",
-        "rx_packets", "rle_and_tails", "device_info_usb_ids",
-        "trigger_gating_alignment",
+        "rx_packets", "rle_and_tails", "short_reply_policy", "unknown_rate_fallback",
+        "device_info_usb_ids", "trigger_gating_alignment",
     }
     for status, _note in MATRIX.values():
         assert status in {"AGREE", "DIFF", "UNKNOWN"}
@@ -299,3 +303,70 @@ def test_order3_crop_decision():
 def test_primary_usb_identity_documented():
     assert MATRIX["device_info_usb_ids"][0] == "DIFF"
     assert (0x1A86, 0xFFCC) == (0x1A86, 0xFFCC)
+
+
+# --------------------------------------------------- short reply / multi-URB
+
+
+def test_short_512b_reply_not_interleaved():
+    assert ref.interleave_prefix_len(512) == 0
+    assert ref.interleave_prefix_len(2047) == 0
+    assert ref.interleave_prefix_len(2048) == 2048
+    assert ref.interleave_prefix_len(16384) == 16384
+    with pytest.raises(ValueError):
+        ref.convert_to_pc(bytes(512))
+    assert MATRIX["short_reply_policy"][0] == "AGREE"
+
+
+def test_multi_urb_reassembly_across_2048_blocks():
+    frames = b"".join([
+        ref.build_rx_frame(1, bytes([0, 0, 0xAA, 0xBB])),
+        ref.build_rx_frame(4, bytes([0, 0, 0x12, 3])),
+        ref.build_rx_frame(6, b""),
+    ])
+    parser = ref.RxParser()
+    for i in range(0, len(frames), 2048):  # 2048B bulk-transfer slices, last short
+        parser.push_bytes(frames[i:i + 2048])
+    assert [m.order for m in parser.messages] == [1, 4, 6]
+    assert parser.desync_count == 0
+
+
+def test_rle_channel_data_then_finalize_preserves_depth():
+    rle = bytes([10, 0x00, 6, 0xFF])  # 10 low + 6 high = 16 packed bytes = 128 samples
+    msg = ref.RxMessage(1, bytes([3, 0x00]) + rle)
+    ch, data = ref.parse_channel_data(msg, is_rle=True)
+    assert ch == 3
+    assert data == b"\x00" * 10 + b"\xff" * 6
+    store = ref.ChannelStore(bytearray(data), sample_count=len(data) * 8)
+    ref.finalize_samples(store, 12)
+    assert store.sample_count == 12
+    assert len(store.data) == 2
+
+
+def test_unknown_rate_falls_back_to_20mhz_in_cpp():
+    assert ref.sample_rate_to_code(3_000_000) == 0
+    assert ref.cpp_rate_code_or_default(3_000_000) == 6
+    assert MATRIX["unknown_rate_fallback"][0] == "DIFF"
+
+
+# ------------------------------------------------ golden vector artifact lock
+
+GOLDEN_PATH = pathlib.Path(__file__).parent / "vectors" / "dl16_protocol_vectors.json"
+
+
+def test_golden_vectors_match_artifact():
+    golden = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
+    assert golden["schema"] == "dl16-protocol-vectors/1"
+    v = golden["vectors"]
+    assert v["crc_123456789"] == format(ref.compute_crc32(b"123456789"), "08x")
+    assert v["crc_empty"] == format(ref.compute_crc32(b""), "08x")
+    assert v["trigger_cpp_ch0_rising"] == ref.trigger_payload_cpp([0], {0: "rising"}).hex()
+    assert v["trigger_cpp_ch0_ch1"] == ref.trigger_payload_cpp([0, 1], {0: "rising", 1: "falling"}).hex()
+    assert v["trigger_cpp_all_immediate"] == ref.trigger_payload_cpp(list(range(16)), is_instantly=True).hex()
+    assert v["trigger_lhx_all_immediate"] == ref.trigger_payload_lhx(list(range(16))).hex()
+    assert v["parameter_buffer_20m_400k_t36k"] == ref.parameter_payload(True, False, 1.6, 6, 400000, 36000).hex()
+    assert v["bank_transform_2048_sha256"] == hashlib.sha256(
+        ref.convert_to_device(bytes(range(256)) * 8)).hexdigest()
+    assert v["device_frame_get_device_data_sha256"] == hashlib.sha256(
+        ref.build_device_frame(0x10)).hexdigest()
+    assert v["rx_frame_order6"] == ref.build_rx_frame(6, b"").hex()

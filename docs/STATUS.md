@@ -2,8 +2,8 @@
 
 ## Independently executed checks
 
-- Python offline suite: 45 passing tests (17 core + 28 DL16-TASK-002 Phase A protocol vectors) on local Python 3.12; GitHub Actions Python offline CI successful.
-- DL16-TASK-002 Phase A: independent offline protocol reference + byte-level vectors, including preserved 9B/10B trigger and 25/500 MHz index conflicts. See `docs/research/DL16-TASK-002-phase-a-protocol-vectors.md`.
+- Python offline suite: 50 passing tests (17 core + 33 DL16-TASK-002 Phase A protocol vectors) on local Python 3.12; GitHub Actions Python offline CI successful.
+- DL16-TASK-002 Phase A: independent offline protocol reference + byte-level vectors + hash-locked golden artifact, including preserved 9B/10B trigger and 25/500 MHz index conflicts. See `docs/research/DL16-TASK-002-phase-a-protocol-vectors.md`.
 - Windows native C++17 / libusb core build: **PASSED** on GitHub-hosted Windows Server 2022, Visual Studio 2022 / MSVC 19.44.
 - Pinned upstream native source: `gjjisadog/ATK-Logic-Mcp@5fc47744c18c99f9ad0f554a965eb8cd1160c836`.
 - CMake generation, Release compilation and static libusb linkage: **PASSED**.
