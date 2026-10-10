@@ -1,23 +1,33 @@
-# Release status — P0 scaffold, 2026-10-10
+# Release status — P0 scaffold, updated 2026-10-10
 
-## Completed in authoring environment
+## Independently executed checks
 
-- Standalone Python project, GPL-3.0, MCP v1 FastMCP adapter and CLI.
-- Pinned third-party C++ backend bootstrap script, no firmware or USB driver writes.
-- Capture JSON sanity gates and file provenance validation.
-- Deterministic chunked edge extraction, PWM period/frequency and dual-channel skew (signed ns, unmatched pulses, P95/P99, waveform-level pass/fail).
-- Native `.bits` + segmented vendor `.atkdl` offline reading (without falsely calling it a hardware test).
-- Documentation: architecture, sources, Windows setup, HIL gates, AGENTS.md, independent task handoff.
-- Python offline test suite: 16 passing tests on Linux Python 3.13 + NumPy 2.3.5 (see associated commit).
+- Python offline suite: 16 passing tests on Linux Python 3.13 and GitHub Actions Python offline CI successful.
+- Windows native C++17 / libusb core build: **PASSED** on GitHub-hosted Windows Server 2022, Visual Studio 2022 / MSVC 19.44.
+- Pinned upstream native source: `gjjisadog/ATK-Logic-Mcp@5fc47744c18c99f9ad0f554a965eb8cd1160c836`.
+- CMake generation, Release compilation and static libusb linkage: **PASSED**.
+- Native test executable `atkdl16_tests.exe`: **28/28 tests passed**.
+- Native CLI `atk-dl16.exe`: produced and launched successfully (help/usage smoke check).
+- Windows build evidence: https://github.com/Ryanyntc2013/atk-logic-mcp-dl16/actions/runs/38035288929
+- Python CI on same tested tree: https://github.com/Ryanyntc2013/atk-logic-mcp-dl16/actions/runs/38035288927
+- GitHub integration has write access; initial scaffold and subsequent CI fixes are on `main`.
 
-## Not verified here
+## Implemented in scaffold
 
-- No native C++ Windows build or unit test completed in this authoring environment (no Visual Studio/libusb checkout available).
-- MCP wire-protocol handshake cannot be executed here because MCP Python SDK is not installed in offline environment.
-- No ATK-DL16 connected; no real-world USB read or trigger gating verified.
-- Upstream RLE, stream, calibration and additional sigrok PD are not exposed as claimed complete functionality.
-- GitHub target repository is not selected in the connected GitHub App installation; remote push was blocked by 403. Local Git bundle and ZIP are provided for manual import.
+- Python FastMCP stdio server and CLI, GPL-3.0.
+- Pinned GPL-3.0 native C++ USB transport and capture backend built on demand under ignored `external/`.
+- Capture JSON integrity gates, native saved-channel files, offline segmented vendor `.atkdl` support.
+- Chunked edge extraction, PWM frequency/period, dual-channel skew, missed-pulse analysis and waveform-level verdicts.
+- Windows bootstrap scripts; explicit human/HIL gates and coding-agent handoff.
+
+## NOT yet verified
+
+- No DL16 is attached to GitHub-hosted runner: **USB enumeration, real capture, trigger behavior and hardware data integrity are not validated**.
+- No demonstrated full Windows Python MCP handshake + native USB device end-to-end session; a CLI help smoke test does not prove live capture.
+- MCP wire-protocol handshake test was skipped in the initial authoring environment without MCP SDK. CI Python dependencies and tests pass, but this is not a physical MCP/device integration test.
+- RLE, stream, calibrated timestamp accuracy, complex triggers and full sigrok PD breadth are not claimed as supported.
+- Cross-channel physical timestamp alignment/uncertainty must be verified with a known split signal and reference scope.
 
 ## Release criterion
 
-Keep the repo at `P0/SCAFFOLD` until DL16-TASK-001 yields compile/test evidence and first real physical capture. Do NOT label production-ready before live HIL.
+Status remains **P0/SCAFFOLD / HIL_NOT_RUN** until `DL16-TASK-001` documents hardware capture, stable MCP startup and physical skew results. C++ compilation and synthetic tests passing are distinct from HIL certification.
