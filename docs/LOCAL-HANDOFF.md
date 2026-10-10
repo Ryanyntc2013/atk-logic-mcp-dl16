@@ -36,3 +36,8 @@ Next task: DL16-TASK-002 <one concrete scope>
 ```
 
 Do not conflate code compiled, native CLI detected, hardware capture succeeded, trigger gated, and <=1us end-to-end accuracy. They are distinct gates.
+
+## Next task already prepared
+
+After this task's physical gate-0/1 evidence (or in parallel for **offline-only** work), the next distinct task is [DL16-TASK-002](tasks/DL16-TASK-002.md). Its underlying independent protocol evidence is [LHX cross-validation](research/LHX369963-dl16-cli-cross-validation-2026-10-10.md). Do **not** mark this initial HIL task complete just because cloud Windows/MSVC CI compiled the backend; skip `DL16-TASK-002` live phases until a safe physical device baseline is confirmed. Agent must not silently alter sample-rate index maps or 9B/10B trigger encoding based on third-party reports.
+
