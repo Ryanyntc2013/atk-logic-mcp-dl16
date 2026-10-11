@@ -39,9 +39,10 @@ def decode_uart(wave: Waveform, *, baud_rate: int = 115200, data_bits: int = 8,
     Idle is high (low when ``invert``). Each frame is sampled at bit centers.
     A valid stop bit consumes the frame even when parity fails. A failed stop
     is not returned and does not use the result limit; the search resumes one
-    bit later. A start must leave idle-high, but only about half a bit is
-    required, and never more than one quantized bit, so a short stop still
-    qualifies before the next byte.
+    bit later, and the next start must then follow more than one bit of idle
+    so a capture that begins mid-frame does not lock onto data edges. A start
+    in an already synchronized stream needs only about half a bit of idle-high,
+    which a short stop bit still satisfies.
     """
     if baud_rate <= 0:
         raise AnalysisError("baud_rate must be positive")
@@ -63,22 +64,23 @@ def decode_uart(wave: Waveform, *, baud_rate: int = 115200, data_bits: int = 8,
     parity_bits = 0 if parity == "none" else 1
     frame_bits = 1 + data_bits + parity_bits + stop_bits
     bit_width = max(1, int(np.ceil(samples_per_bit)))
-    # ceil(samples_per_bit) is wider than a stop bit that quantizes to
-    # floor(samples_per_bit) samples. Half a bit shows the line was idle, and
-    # the check never asks for more highs than one whole quantized bit.
-    idle_need = min(
-        max(1, int(np.floor(samples_per_bit))),
-        max(1, int(np.floor(samples_per_bit / 2.0))),
-    )
+    # Half a bit of idle-high. samples_per_bit >= 2, so this is at least one
+    # sample and never wider than a whole quantized bit.
+    idle_need = max(1, int(np.floor(samples_per_bit / 2.0)))
+    # After a rejected stop, one bit of high is indistinguishable from a data
+    # bit. Demand a longer idle before accepting another start.
+    resync_idle = bit_width + 1
     falling = np.flatnonzero(line[:-1] & ~line[1:]) + 1
     frames: list[dict[str, Any]] = []
     next_frame_start = 0
+    need_long_idle = False
     for start in falling:
         if start < next_frame_start:
             continue  # An edge inside the preceding frame is a data bit, not a new start.
-        # A start bit is a fall out of idle. A full ceil(bit) of highs rejects
-        # back-to-back ASCII, whose stop bit is only ~samples_per_bit wide.
-        if start < idle_need or not bool(np.all(line[start - idle_need:start])):
+        # A synchronized start may follow a single short stop bit. A resync
+        # after a bad stop waits for a break longer than one bit.
+        required_idle = resync_idle if need_long_idle else idle_need
+        if start < required_idle or not bool(np.all(line[start - required_idle:start])):
             continue
         centers = np.round(start + (np.arange(frame_bits) + 0.5) * samples_per_bit).astype(int)
         if centers[-1] >= n:
@@ -102,15 +104,17 @@ def decode_uart(wave: Waveform, *, baud_rate: int = 115200, data_bits: int = 8,
             # may begin immediately after the stop bit(s).
             frames.append({"start_sample": int(start), "value": value,
                            "parity_ok": parity_ok, "stop_ok": True})
+            need_long_idle = False
             # Floor keeps a following start that lands on the stop boundary.
             # Data edges sit at least a stop bit earlier, so they stay inside.
             next_frame_start = int(np.floor(start + frame_bits * samples_per_bit))
             if len(frames) >= limit:
                 break
         else:
-            # A failed stop is a resync, not a byte. Skip one bit and keep
-            # searching so the attempt does not fill the result limit or hide
-            # a later real start.
+            # A failed stop is a resync, not a byte. Skip one bit and require
+            # a longer idle before the next start, so data edges in a capture
+            # that began mid-frame are not returned as bytes.
+            need_long_idle = True
             next_frame_start = start + bit_width
     return frames
 

@@ -278,8 +278,7 @@ def test_selftest_real_claim_is_clear_after_success_and_exception(monkeypatch):
     backend._SESSION = None
     backend._SESSION_PATH = None
     backend._RETIRING.clear()
-    backend._SELF_TEST_CLAIMED = False
-    backend._self_test_claim.held = False
+    backend._reset_self_test_claim_for_tests()
     try:
         seen = {}
 
@@ -315,12 +314,10 @@ def test_selftest_real_claim_is_clear_after_success_and_exception(monkeypatch):
         assert seen["busy_during_exception"] is True
         assert backend.device_busy() is False
     finally:
-        backend._self_test_claim.held = True
-        backend.release_self_test_claim()
+        backend._reset_self_test_claim_for_tests()
         backend._SESSION, backend._SESSION_PATH = previous[0], previous[1]
         backend._RETIRING[:] = previous[2]
         backend._SELF_TEST_CLAIMED = previous[3]
-        backend._self_test_claim.held = False
 
 
 def test_selftest_refuses_oneshot_without_touching_outputs(monkeypatch):

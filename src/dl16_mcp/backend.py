@@ -136,6 +136,26 @@ def release_self_test_claim() -> None:
         _self_test_claim.held = False
 
 
+def _reset_self_test_claim_for_tests() -> None:
+    """Clear the self-test claim from whichever thread took it.
+
+    Test teardown only. Production callers use ``release_self_test_claim``.
+    """
+    global _SELF_TEST_CLAIMED
+    with _SESSION_LOCK:
+        _SELF_TEST_CLAIMED = False
+        _self_test_claim.held = False
+
+
+def _outsider_during_self_test() -> bool:
+    """True when another thread's self-test claim is active. Caller holds the lock."""
+    return _SELF_TEST_CLAIMED and not getattr(_self_test_claim, "held", False)
+
+
+def _self_test_busy_result() -> dict[str, Any]:
+    return {"success": False, "error_code": "DEVICE_BUSY", "message": "self-test holds the device"}
+
+
 def _track_retiring(session: NativeSession) -> None:
     global _SESSION, _SESSION_PATH
     with _SESSION_LOCK:
@@ -165,7 +185,7 @@ def _finish_retire(session: NativeSession) -> dict[str, Any]:
 def _get_session(cli: Path) -> NativeSession:
     global _SESSION, _SESSION_PATH
     with _SESSION_LOCK:
-        if _SELF_TEST_CLAIMED and not getattr(_self_test_claim, "held", False):
+        if _outsider_during_self_test():
             raise SessionFailure("DEVICE_BUSY", "self-test holds the device")
         if (_SESSION is not None and _SESSION_PATH == cli
                 and not _SESSION.failed):
@@ -457,9 +477,8 @@ def pwm(output: int, action: str = "configure", frequency_hz: int = 1000,
 def close_session() -> dict[str, Any]:
     global _SESSION, _SESSION_PATH
     with _SESSION_LOCK:
-        if _SELF_TEST_CLAIMED and not getattr(_self_test_claim, "held", False):
-            return {"success": False, "closed": False, "error_code": "DEVICE_BUSY",
-                    "message": "self-test holds the device"}
+        if _outsider_during_self_test():
+            return {**_self_test_busy_result(), "closed": False}
         session, _SESSION = _SESSION, None
         _SESSION_PATH = None
         still_busy = any(item is not session and _owner_still_busy(item) for item in _RETIRING)
@@ -509,6 +528,8 @@ def stream_start(*, experimental_opt_in: bool = False, safety_confirmation: str 
 
 def stream_control(operation_id: str, *, cancel: bool = False) -> dict[str, Any]:
     with _SESSION_LOCK:
+        if cancel and _outsider_during_self_test():
+            return _self_test_busy_result()
         session = _SESSION
     if session is None or session.failed or not _session_enabled():
         return {"success": False, "error_code": "NO_ACTIVE_SESSION", "message": "Original owner unavailable"}
@@ -543,6 +564,8 @@ def buffer_start(request: CaptureRequest, trigger_timeout_sec: int = 30) -> dict
 def buffer_control(operation_id: str, *, cancel: bool = False) -> dict[str, Any]:
     # Never create/restart a worker to poll an operation belonging to a lost owner.
     with _SESSION_LOCK:
+        if cancel and _outsider_during_self_test():
+            return _self_test_busy_result()
         session = _SESSION
     if session is None or session.failed or not _session_enabled():
         return {"success": False, "error_code": "NO_ACTIVE_SESSION", "message": "Original owner unavailable"}

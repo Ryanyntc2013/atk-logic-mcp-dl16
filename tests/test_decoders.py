@@ -99,6 +99,28 @@ def test_uart_noninteger_ratio_keeps_back_to_back_ascii():
     assert all(frame["parity_ok"] and frame["stop_ok"] for frame in frames)
 
 
+def test_uart_mid_frame_capture_does_not_invent_bytes():
+    # 0x55 toggles every bit. A slice that starts inside that byte has falling
+    # edges with a full bit of high; those must not become bytes, including
+    # when the next byte follows after only its stop bit.
+    spb = 10
+
+    def frame(byte):
+        bits = [0] * spb
+        for k in range(8):
+            bits += [((byte >> k) & 1)] * spb
+        bits += [1] * spb
+        return bits
+
+    stream = [1] * 20 + frame(0x55) + frame(0x41)
+    mid = stream[50:]
+    assert decode_uart(wf(0, mid), baud_rate=100_000) == []
+    resynced = mid + [1] * (spb * 2) + frame(0x41)
+    frames = decode_uart(wf(0, resynced), baud_rate=100_000)
+    assert [frame["value"] for frame in frames] == [0x41]
+    assert all(frame["parity_ok"] and frame["stop_ok"] for frame in frames)
+
+
 def test_uart_inverted_and_two_stop_bits():
     w = wf(0, uart_bits(0x0F, 10, stop=2, invert=True))
     frames = decode_uart(w, baud_rate=100_000, stop_bits=2, invert=True)
