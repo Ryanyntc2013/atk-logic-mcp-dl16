@@ -1,3 +1,29 @@
+# Latest continuation — TASK-052, 2026-10-11
+
+OFFLINE ONLY / HIL_NOT_RUN; no hardware/no commit. Pinned vendor Order3 byte-count
+crop is **Buffer-only**; Stream units and AA meaning remain unresolved. Immutable
+TASK051 all16 archive reproduced/hash-checked; versioned executable hypotheses
+show fixed16 vs32-byte rounding agree at20ms but diverge at10/30ms. No crop or
+public Stream promotion. Internal diagnostic now logs exact2048B TX and linear
+parameter/trigger frames plus cached device-open profile (not bus evidence),
+with native/reference roundtrip/CRC tests; smallest native target built,
+**16 focused /277 full tests passed**, compileall/diff-check passed. Parent-only two-depth proposal
+and stop conditions: `tasks/DL16-TASK-052-stream-units-hypotheses.md`. No automatic
+HIL approval; stop after first anomaly, never extend deadline/retry to force data.
+
+# TASK-053 depth comparison — offline follow-up
+
+Parent10/30ms20MHz captures preserve all16 channels25008/75008 bytes with8AA
+suffix;20ms prior had50016/16AA. Fixed16,universal8 and round32 hypotheses fail.
+Order3 fields new profiles are2^40-16 and2^40-8 (signed hypotheses -16/-8), NOT
+usable unsigned byte counts;field*2+6 fails even20ms (50008 !=50016).
+Exact constructed TX CRC/payload checks verify Stream/noRLE depths and CH8/14-only
+immediate trigger; cached model DL16 Plus MCU19/FPGA222. TX is not bus-observed.
+Original archives untouched; versioned profiles/reproducer/regressions delivered.
+UNKNOWN validity/tails/alignment; public Stream still blocked. Next safe offline
+gate: Order3 variant/range discriminator, preserve raw fields, reject impossible
+counts before allocation/crop. See TASK053 report. No new HIL/no commit.
+
 # TASK-051 parent evidence follow-up — 2026-10-11
 
 Parent corrected `stream-02` captured all16 channel payloads50016 bytes each,

@@ -1,0 +1,12 @@
+{
+  "schema": "task052-hypotheses/v1",
+  "authority": "OFFLINE_HYPOTHESES_NOT_HIL_CONTRACT",
+  "archive_raw_sha256": "14344a2eab2c2acdd01966e1bccbd90a7ca7c81b6d732dc378affe6e7fa9c824",
+  "selected_crop": null,
+  "data_integrity": "UNKNOWN",
+  "cases": [
+    {"depth_ms": 10, "requested_samples": 200000, "fixed16-v1": 25016, "align32-v1": 25024, "word-count-plus14-v1": 25016, "candidate_order3_words-v1": 12501},
+    {"depth_ms": 20, "requested_samples": 400000, "fixed16-v1": 50016, "align32-v1": 50016, "word-count-plus14-v1": 50016, "candidate_order3_words-v1": 25001},
+    {"depth_ms": 30, "requested_samples": 600000, "fixed16-v1": 75016, "align32-v1": 75008, "word-count-plus14-v1": 75016, "candidate_order3_words-v1": 37501}
+  ]
+}

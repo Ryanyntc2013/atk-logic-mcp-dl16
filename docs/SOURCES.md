@@ -1,5 +1,30 @@
 # Upstream provenance and reuse matrix (2026-10-10)
 
+## TASK-052 mode-specific units and diagnostic TX provenance
+
+Pinned VENDOR `pv/thread/thread_work.cpp` at
+`0dff562d24436def2bec3791684f1911997b9e35` lines230–278 reads Order3 counts as bytes
+**only in Buffer mode**. CPP `rx_parser.cpp` names them bytes for all modes;
+`capture.cpp` multiplies by8. This source scope difference does not establish
+Stream units: TASK051 fields25001 and50016 stored bytes cannot choose between
+fixed16 extras,32-byte rounding or candidate word-count-plus14. Exact16 AA suffix
+is an archived observation, not a sentinel/strip contract. No LHX code copied.
+Independent executable alternatives/tests retain UNKNOWN/null crop. Diagnostic
+records exact host-constructed parameter/trigger transport and linear bytes plus
+cached open-query device profile, not wire-observed TX or HIL acceptance; no new
+USB query/protocol behavior. See [TASK052](tasks/DL16-TASK-052-stream-units-hypotheses.md)
+for pinned links, hashes, focused tests and bounded parent-only10/30ms proposal.
+
+## TASK-053 cross-depth observation provenance
+
+Parent depth10/30ms archives have25008/75008 bytes on all16 channels,8AA suffixes;
+prior20ms has50016/16AA. Fixed16/round32/universal8 rules are contradicted.
+Order3 raw40 fields2^40-16 /2^40-8 are preserved, signed hypotheses not established
+units. `field*2+6` also fails20ms arithmetic. New versioned sanitized profiles and
+bounded read-only reproducer verify stored channels and host-constructed TX CRC;
+HOST_CONSTRUCTED_NOT_BUS_OBSERVED and cached profile authority kept distinct.
+No LHX borrowing or crop/COMPLETE/HIL_PASS claim; see TASK053 report for next gate.
+
 ## TASK-051 parent Stream observation provenance
 
 `tests/vectors/task051-stream-observation-v1.json` stores sanitized exact counts,

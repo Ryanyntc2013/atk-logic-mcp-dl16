@@ -69,6 +69,25 @@ struct Evidence {
         }
     }
 };
+static void tx_evidence(std::ostream& out, const char* kind, const std::vector<uint8_t>& frame) {
+    std::vector<uint8_t> linear(frame.size());
+    convert_to_pc(frame.data(),linear.data(),frame.size());
+    out << "{\"kind\":\"" << kind << "\",\"authority\":\"HOST_CONSTRUCTED_NOT_BUS_OBSERVED\",\"transport_hex\":\"";
+    hex(out,frame); out << "\",\"linear_hex\":\""; hex(out,linear);
+    out << "\"}\n";
+}
+static void profile_evidence(std::ostream& out, const DeviceInfo& info) {
+    out << "{\"kind\":\"device_profile\",\"authority\":\"CACHED_DEVICE_OPEN_QUERY_NOT_INDEPENDENT_VERIFICATION\",\"vid\":" << info.vid
+        << ",\"pid\":" << info.pid << ",\"model_enum\":" << static_cast<int>(info.model)
+        << ",\"model_name_hex\":\"";
+    hex(out,std::vector<uint8_t>(info.model_name.begin(),info.model_name.end()));
+    out << "\",\"usb_speed_enum\":" << static_cast<int>(info.usb_speed)
+        << ",\"mcu_firmware_version\":" << info.mcu_firmware_version
+        << ",\"fpga_firmware_version\":" << info.fpga_firmware_version
+        << ",\"hardware_version\":" << info.hardware_version
+        << ",\"device_level\":" << info.device_level << ",\"channel_count\":" << info.channel_count
+        << ",\"zero_or_unknown_fields_are_not_verified\":true}\n";
+}
 static int self_test() {
     CaptureConfig c; c.mode=CaptureMode::Stream; c.enabled_channels={8,14}; c.trigger.is_instantly=true; c.trigger.position_percent=0;
     auto check=[](bool b){if(!b)throw std::runtime_error("self-test failed");};
@@ -95,7 +114,17 @@ static int self_test() {
         frame=pwm_frame(ch,true);linear.resize(frame.size());convert_to_pc(frame.data(),linear.data(),frame.size());
         check(linear[9]==0x17 && linear[10]==2 && linear[11]==(ch==0?0x10:0x20));
     }
-    std::cout << "SYNTHETIC_OFFLINE stream mode/bounds/deadline/frame tests passed; PWM configure/stop exact production helper contract passed\n"; return 0;
+    for(const auto& f : {build_parameter_setting_frame(c),build_simple_trigger_frame(c)}) {
+        std::vector<uint8_t> pc(f.size()), back(f.size());
+        convert_to_pc(f.data(),pc.data(),f.size());convert_to_device(pc.data(),back.data(),pc.size());check(back==f);
+        auto crc=compute_crc32(pc.data()+9,static_cast<size_t>(pc[10])+1);
+        const size_t footer=10+pc[10];check(pc[footer]==0x0b);
+        for(unsigned i=0;i<4;++i)check(pc[footer+1+i]==static_cast<uint8_t>(crc>>(8*i)));
+    }
+    tx_evidence(std::cout,"parameter",build_parameter_setting_frame(c));
+    tx_evidence(std::cout,"trigger",build_simple_trigger_frame(c));
+    DeviceInfo fixture;fixture.model_name="synthetic\"fixture";profile_evidence(std::cout,fixture);
+    std::cout << "SYNTHETIC_OFFLINE stream mode/bounds/deadline/frame tests passed; PWM configure/stop exact production helper contract passed; TX roundtrip/CRC passed\n"; return 0;
 }
 int main(int argc,char** argv) {
     try {
@@ -110,6 +139,7 @@ int main(int argc,char** argv) {
         if(!e.events)throw std::runtime_error("event open failed");for(auto& f:e.channels)if(!f)throw std::runtime_error("channel open failed");
         RawRxLog metadata;RawRxWriter raw(metadata);if(!raw.open((dir/"raw-rx.bin").u8string(),cap))throw std::runtime_error(metadata.error);
         Device device;auto opened=device.open();if(!opened)throw std::runtime_error("device open failed: "+opened.message);
+        const auto parameter_frame=build_parameter_setting_frame(c), trigger_frame=build_simple_trigger_frame(c);
         bool stop_attempted=false,stop_ok=false,pwm0_stop=false,pwm1_stop=false;
         auto send=[&](const std::vector<uint8_t>& f,int timeout){if(timeout<=0)throw std::runtime_error("send deadline expired");auto r=device.transport().write_bulk(EP_BULK_OUT,f.data(),f.size(),timeout);if(!r)throw std::runtime_error(r.message);};
         std::string reason="DEADLINE";
@@ -120,10 +150,13 @@ int main(int argc,char** argv) {
                     for(int ch=0;ch<2;++ch){f=pwm_frame(ch,true);bool r=static_cast<bool>(d.transport().write_bulk(EP_BULK_OUT,f.data(),f.size(),50));(ch==0?p0:p1)=r;}}
             } cleanup{device,stop_attempted,stop_ok,pwm0_stop,pwm1_stop};
             try {
+                profile_evidence(e.events,device.info());
+                tx_evidence(e.events,"parameter",parameter_frame);tx_evidence(e.events,"trigger",trigger_frame);
+                e.events.flush();if(!e.events)throw std::runtime_error("TX/profile evidence write failed");
                 for(int ch=0;ch<2;++ch) send(pwm_frame(ch,false),50);
-                send(build_parameter_setting_frame(c),50);std::this_thread::sleep_for(std::chrono::milliseconds(30));
+                send(parameter_frame,50);std::this_thread::sleep_for(std::chrono::milliseconds(30));
                 const auto deadline=Clock::now()+std::chrono::milliseconds(100);
-                send(build_simple_trigger_frame(c),remaining(deadline,20));
+                send(trigger_frame,remaining(deadline,20));
                 RxParser parser;std::vector<uint8_t> input(16384),converted(16384);
                 while(int timeout=remaining(deadline,10)) {
                     // Reserve a whole framed read before USB; never discard a cap-overflowing read.
