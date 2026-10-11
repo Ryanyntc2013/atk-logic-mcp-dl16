@@ -346,7 +346,7 @@ def logic_self_test(confirm_safe_wiring: bool = False) -> dict[str, Any]:
         # Existing test procedure uses separate native owners for Buffer and Stream.
         # Verify cleanup before starting a second owner; do not assume close worked.
         closed = logic_session_close()
-        if not closed.get("success"):
+        if not closed.get("success") or closed.get("closed") is not True:
             return {"success": False, "error_code": "INTERMEDIATE_CLOSE_FAILED", "close": closed}
         active_output_possible = True
         p0 = logic_pwm(0, "configure", 1000, 50.0, confirm_safe_wiring=True)
