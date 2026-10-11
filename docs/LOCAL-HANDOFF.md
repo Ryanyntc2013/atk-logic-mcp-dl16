@@ -1,3 +1,14 @@
+# Latest continuation — TASK-062, 2026-10-11
+
+HIL DONE. Probed full Stream sample rate ladder across 2MHz (500ms), 5MHz (200ms),
+10MHz (100ms), and 20MHz (100ms) on physical DL16 Plus with PWM loopback.
+All rates completed successfully with `reason: DEADLINE`, `cleanup_stop_ok: true`.
+Timing profiling confirmed packed disk writing consumes <1.5% of receive time and
+chunk flushing consumes <5% of total elapsed time, demonstrating ample I/O headroom
+and zero USB backpressure or dropped frames across all supported rates.
+Evidence retained in `artifacts/hil/DL16-TASK-062/` (`ladder_results.json`, `native-hash.txt`).
+Details: [tasks/DL16-TASK-062-stream-sample-rate-ladder.md](tasks/DL16-TASK-062-stream-sample-rate-ladder.md).
+
 # Latest continuation — TASK-061, 2026-10-11
 
 HIL DONE. Verified long Stream capture (5000ms planned) and live cooperative cancellation.
