@@ -251,12 +251,35 @@ def to_samples_csv(wave: Waveform, *, max_samples: int = 2_000_000) -> str:
     return "\n".join(rows) + "\n"
 
 
+def _set_packed_level(data: bytearray, start: int, end: int, level: int) -> None:
+    """Set a half-open bit interval in packed LSB-first storage."""
+    if start >= end:
+        return
+    first, first_bit = divmod(start, 8)
+    last, last_bit = divmod(end, 8)
+    fill = 0xFF if level else 0x00
+    if first == last:
+        mask = ((1 << (end - start)) - 1) << first_bit
+        data[first] = (data[first] | mask) if level else (data[first] & ~mask)
+        return
+    if first_bit:
+        mask = (0xFF << first_bit) & 0xFF
+        data[first] = (data[first] | mask) if level else (data[first] & ~mask)
+        first += 1
+    if last > first:
+        data[first:last] = bytes((fill,)) * (last - first)
+    if last_bit:
+        mask = (1 << last_bit) - 1
+        data[last] = (data[last] | mask) if level else (data[last] & ~mask)
+
+
 def glitch_filter(raw: bytes, sample_count: int, *, min_pulse_samples: int,
                   max_edges: int = 2_000_000) -> tuple[bytes, int]:
-    """Return (filtered_bits, removed_pulse_count).
+    """Remove runs shorter than threshold without expanding the whole waveform.
 
-    Any run shorter than min_pulse_samples is replaced by the surrounding stable
-    level (a leading short run takes the next run's level). Never drops samples.
+    Uses chunked edge extraction plus packed-bit edits; sample count is preserved.
+    The initial short run takes the following level, and other short runs take
+    the most recent stable level (matching the earlier implementation).
     """
     if min_pulse_samples < 1:
         raise AnalysisError("min_pulse_samples must be positive")
@@ -264,26 +287,28 @@ def glitch_filter(raw: bytes, sample_count: int, *, min_pulse_samples: int,
         raise AnalysisError("Invalid sample count for packed waveform")
     if sample_count == 0:
         return b"", 0
-    bits = np.unpackbits(np.frombuffer(raw, dtype=np.uint8), bitorder="little")[:sample_count]
-    changes = np.flatnonzero(np.diff(bits.astype(np.int8)) != 0) + 1
-    starts = np.concatenate(([0], changes))
-    ends = np.concatenate((changes, [sample_count]))
-    if len(starts) - 1 > max_edges:
+    transitions, _ = digital_transitions(raw, sample_count, max_edges=max_edges)
+    if len(transitions) > max_edges:
         raise AnalysisError("Too many runs: narrow the analysis window")
-    out = bits.copy()
+    output = bytearray(raw[:(sample_count + 7) // 8])
+    level = int(raw[0] & 1)
+    start = 0
+    stable_level: int | None = None
     removed = 0
-    last_stable: int | None = None
-    for i, (s, e) in enumerate(zip(starts, ends)):
-        if e - s >= min_pulse_samples:
-            last_stable = int(bits[s])
+    for end in [*transitions, sample_count]:
+        end = int(end)
+        if end - start >= min_pulse_samples:
+            stable_level = level
         else:
-            if last_stable is None:
-                nxt = int(bits[starts[i + 1]]) if i + 1 < len(starts) else 0
-                out[s:e] = nxt
-            else:
-                out[s:e] = last_stable
+            next_level = 1 - level if end < sample_count else 0
+            fill_level = next_level if stable_level is None else stable_level
+            _set_packed_level(output, start, end, fill_level)
             removed += 1
-    return np.packbits(out, bitorder="little").tobytes(), removed
+        level = 1 - level
+        start = end
+    if sample_count % 8:
+        output[-1] &= (1 << (sample_count % 8)) - 1
+    return bytes(output), removed
 
 
 def search_conditions(waves: dict[int, Waveform], conditions, *, limit: int = 100,
