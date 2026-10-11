@@ -59,6 +59,12 @@ def _session_enabled() -> bool:
     return os.environ.get("DL16_BACKEND_MODE", "oneshot").strip().lower() == "session"
 
 
+def has_owned_session() -> bool:
+    """Conservative guard: self-test must not preempt an existing MCP owner."""
+    with _SESSION_LOCK:
+        return _SESSION is not None and not getattr(_SESSION, "_closed", False)
+
+
 def _get_session(cli: Path) -> NativeSession:
     global _SESSION, _SESSION_PATH
     with _SESSION_LOCK:
