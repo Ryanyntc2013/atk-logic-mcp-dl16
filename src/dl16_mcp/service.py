@@ -205,3 +205,14 @@ def logic_sigrok(vcd_file: str, decoder: str, channels: dict[str, int],
         return decode_vcd(Path(vcd_file), decoder, channels, options, timeout_s)
     except (OSError, ValueError, TypeError) as exc:
         return {"success": False, "error_code": "SIGROK_INPUT_INVALID", "message": str(exc)[:1024]}
+
+
+def logic_export_atkdl(capture_id: str, channels: list[int], out_name: str) -> dict[str, Any]:
+    from pathlib import Path
+    from .atkdl_export import write_atkdl
+    try:
+        if not out_name or Path(out_name).name != out_name or out_name in (".", ".."):
+            raise ValueError("out_name must be a simple .atkdl filename")
+        return write_atkdl([load_capture(capture_id, ch) for ch in channels], exports_dir() / out_name)
+    except (OSError, ValueError, KeyError) as exc:
+        return {"success": False, "error_code": "ATKDL_EXPORT_INVALID", "message": str(exc)}

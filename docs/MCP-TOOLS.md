@@ -32,6 +32,10 @@ REAL_HARDWARE sources stay distinct.
   `["ch7=rising","ch15=high"]` (AND, same sample).
 - `logic_decode(capture_id, protocol, channels, baud_rate, cpol, cpha, data_bits, parity, stop_bits, invert, bit_order, bits_per_word)`.
 
+## Experimental `.atkdl` writer
+
+`logic_export_atkdl(capture_id, channels, out_name)` writes the known offline-reader ZIP subset with matching channel depth/rate and preserved provenance. Existing destinations are protected. Returns `gui_compatibility=UNVERIFIED`: successful reader roundtrip is NOT official GUI compatibility or physical capture certification.
+
 ## Optional sigrok host
 
 `logic_sigrok(vcd_file, decoder, channels, options=None, timeout_s=30)` decodes a saved VCD through explicitly installed `sigrok-cli`. It does not capture USB traffic. Input is capped at 64 MiB; returned output preview at 64 KiB, stderr at 4 KiB. Missing binary returns `SIGROK_MISSING`. Decoder/channel/option identifiers are validated and no shell is invoked. External decoder catalogue is not certified; this environment has no installed sigrok-cli, so only offline mocked contract tests have run.

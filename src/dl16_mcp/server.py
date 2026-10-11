@@ -8,6 +8,12 @@ mcp = FastMCP("atk-logic-mcp-dl16")
 
 
 @mcp.tool()
+def logic_export_atkdl(capture_id: str, channels: list[int], out_name: str) -> dict:
+    """Write experimental offline-reader .atkdl subset; GUI compatibility UNVERIFIED."""
+    return service.logic_export_atkdl(capture_id, channels, out_name)
+
+
+@mcp.tool()
 def logic_sigrok(vcd_file: str, decoder: str, channels: dict[str, int],
                  options: dict[str, str] | None = None, timeout_s: float = 30) -> dict:
     """Decode a saved VCD through optional sigrok-cli with bounded output; no USB access."""
