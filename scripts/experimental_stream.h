@@ -150,8 +150,8 @@ StreamObservation run_stream(const CaptureConfig& cfg, const std::string& direct
                     if(result.order6){result.reason="ORDER6_OBSERVED";break;}
                 }
                 result.short_bytes+=raw_carry.size();
-                if(writer.total_bytes()==0 && !raw_carry.empty() && result.reason=="DEADLINE") result.reason="SHORT_RX";
-                if(cancel.load() && result.reason=="DEADLINE")result.reason="CANCELLED";
+                if(cancel.load()) result.reason="CANCELLED";
+                else if(writer.total_bytes()==0 && !raw_carry.empty() && result.reason=="DEADLINE") result.reason="SHORT_RX";
             }
         }
     } catch(const std::exception& e) {result.reason=std::string(e.what())=="packed byte cap reached"?"BYTE_CAP":"OWNER_ERROR";}

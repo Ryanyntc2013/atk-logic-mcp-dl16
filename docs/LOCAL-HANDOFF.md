@@ -1,3 +1,15 @@
+# Latest continuation — TASK-061, 2026-10-11
+
+HIL DONE. Verified long Stream capture (5000ms planned) and live cooperative cancellation.
+Physical execution: 1MHz on CH8/CH14 (PWM 1kHz/2kHz) with `raw_rx_logging=True`.
+Stream progressed smoothly across 92 reads (stored 1,040,384 bytes across 16 channels),
+at which point `logic_stream_cancel` was triggered. Engine terminated within ~40ms on read 93,
+flushed all partial writes to disk, cleanly marked `reason: CANCELLED` (`stored_bytes: 1056640`),
+successfully sent hardware stop frame (`cleanup_stop_ok: true`), and verified the physical device
+remains fully responsive for subsequent queries and clean session closing.
+Evidence retained in `artifacts/hil/DL16-TASK-061/` (`result.json`, `records.json`, `native-hash.txt`).
+Details: [tasks/DL16-TASK-061-stream-long-cancel-evidence.md](tasks/DL16-TASK-061-stream-long-cancel-evidence.md).
+
 # Latest continuation — TASK-060, 2026-10-11
 
 HIL DONE. Implemented multi-read carry-over buffering in `scripts/experimental_stream.h`.
