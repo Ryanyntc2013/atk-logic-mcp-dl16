@@ -1,3 +1,16 @@
+# Latest continuation — TASK-059, 2026-10-11
+
+HIL DONE. Ran ONE bounded 1MHz/1000ms Stream capture with `raw_rx_logging=True`.
+`SHORT_RX` reproduced cleanly after 123,952 bytes (32 reads, 55.3 ms), short_bytes=512.
+All 32 records captured into `rx.bin` (523,016 bytes). Records 0..30 are 16,384 bytes
+(8 * 2048-byte banks). Record 31 is 14,848 bytes (29 * 512-byte USB packets = 7 * 2048
+banks + 512 bytes remainder). The 512-byte tail starts with `0a 01` (Order 1 ChannelData
+lane 0). `read_bulk` returned `Error::ok()` (non-fatal timeout on a USB 512B boundary).
+Root cause of `SHORT_RX` termination identified: `experimental_stream.h` lacks carry-over
+buffering across reads, aborting whenever a USB read ends on a 512B boundary instead of 2048B.
+Evidence retained in `artifacts/hil/DL16-TASK-059/`. Stop and session close succeeded.
+Details: [tasks/DL16-TASK-059-stream-short-rx-evidence.md](tasks/DL16-TASK-059-stream-short-rx-evidence.md).
+
 # Latest continuation — TASK-058, 2026-10-11
 
 DONE offline / NEEDS_HUMAN_HIL; HIL_NOT_RUN, no commit. Added optional bounded
