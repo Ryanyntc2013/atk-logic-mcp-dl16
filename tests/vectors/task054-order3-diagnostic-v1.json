@@ -1,0 +1,10 @@
+{
+  "schema": "task054-order3-diagnostic-v1",
+  "authority": "OFFLINE_REGRESSION_INPUTS_NOT_INTERPRETATION",
+  "cases": [
+    {"source": "task052-hypotheses-v1 plus task051-stream-observation-v1", "profile": "task051-buffer-observed-layout-v1", "mode": "BUFFER", "requested_samples": 400000, "order3_offset_raw": 22, "count_fields_raw_u40": [25001], "observed_packed_bytes_per_channel": 50016, "selected_crop": null},
+    {"source": "task053-depth10-observation-v1", "profile": "task053-depth10-stream-v1", "mode": "STREAM", "requested_samples": 200000, "order3_offset_raw": 17, "count_fields_raw_u40": [1099511627760], "observed_packed_bytes_per_channel": 25008, "selected_crop": null},
+    {"source": "task053-depth30-observation-v1", "profile": "task053-depth30-stream-v1", "mode": "STREAM", "requested_samples": 600000, "order3_offset_raw": 21, "count_fields_raw_u40": [1099511627768], "observed_packed_bytes_per_channel": 75008, "selected_crop": null}
+  ],
+  "limits": {"alignment_status": "UNKNOWN", "tail_status": "UNKNOWN", "signed40": "hypothesis only", "stream_crop": "not available", "raw_bytes": "preserved exactly"}
+}

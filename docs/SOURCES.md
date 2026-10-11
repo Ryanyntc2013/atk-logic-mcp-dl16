@@ -1,5 +1,15 @@
 # Upstream provenance and reuse matrix (2026-10-10)
 
+## TASK-054 Order3 offline discriminator provenance
+
+`src/dl16_mcp/order3_diagnostics.py` is an independently authored bounded
+layout/range diagnostic; it copies no third-party implementation. It preserves
+raw bytes and uint40 fields, reports signed40 only as a named hypothesis, and
+never returns a crop. Buffer byte-count convention remains explicitly scoped;
+Stream units, tails, alignment and validity remain UNKNOWN. Versioned regression
+inputs reference the TASK051/052/053 observations, not new hardware evidence.
+
+
 ## TASK-052 mode-specific units and diagnostic TX provenance
 
 Pinned VENDOR `pv/thread/thread_work.cpp` at

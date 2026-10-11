@@ -1,3 +1,15 @@
+# Latest continuation — TASK-054, 2026-10-11
+
+DONE: added import-safe `dl16_mcp.order3_diagnostics` for bounded offline Order3
+layout/range reporting. Raw bytes and uint40 values are preserved; signed40 is
+explicitly a hypothesis, unsafe unsigned counts are not usable crop/allocation
+inputs, and no crop is selected. Buffer convention scope is unchanged; Stream
+units/tail/alignment remain UNKNOWN. Versioned TASK051/052/053 multi-depth
+regressions and malformed/extreme synthetic cases added. Validation: focused **4 passed**; full `.venv\\Scripts\\python.exe -m pytest -q`
+**286 passed in 10.41s**; `.venv\\Scripts\\python.exe -m compileall -q src` and
+`git diff --check` exit 0. HIL_NOT_RUN; no USB/native changes and no commit. See
+`tasks/DL16-TASK-054-order3-discriminator.md`.
+
 # Latest continuation — TASK-052, 2026-10-11
 
 OFFLINE ONLY / HIL_NOT_RUN; no hardware/no commit. Pinned vendor Order3 byte-count
