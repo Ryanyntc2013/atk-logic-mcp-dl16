@@ -16,8 +16,12 @@ were read-only hashed before/after; original FAIL becomes a newly recorded
 rewritten historical verdict, hardware gating proof, or ≤1us product claim.
 Synthetic regressions retain SYNTHETIC; absent source labels remain UNKNOWN.
 No native executable, USB command, driver, firmware, threshold or live action
-changed. HIL_NOT_RUN. Complete requested test command remains FAIL due to the
-separately reproduced pre-existing B6 assertion; it is not relabeled PASS.
+changed. HIL_NOT_RUN. Initial complete test-command failure is preserved in its
+original logs. Completion corrected only the stale B6 offline mock to the
+unchanged retry-only info warm-up contract, adding exact event/token and
+no-first-launch-query assertions; no recovery implementation changed. Final
+requested command is PASS (63 tests); all six related files PASS (191 tests),
+without exclusions/skips.
 
 ## TASK-058 Stream raw-RX logging boundary
 

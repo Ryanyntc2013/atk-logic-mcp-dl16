@@ -237,7 +237,61 @@
          },
 --- a/tests/tools/test_atk_dl16_headless_offline.py
 +++ b/tests/tools/test_atk_dl16_headless_offline.py
-@@ -262,3 +262,105 @@
+@@ -104,16 +104,18 @@
+ 
+ 
+ def test_prepare_retries_protocol_error_then_arms(tmp_path: Path):
+-    """prepare() re-probes device_info and retries PROTOCOL_ERROR early exits."""
++    """Only a failed launch gets an info warm-up before the capture retry."""
+     import subprocess
+ 
+     fake_cli = tmp_path / "atk-dl16.exe"
+     fake_cli.write_bytes(b"MZ")
+     backend = AtkDl16CaptureBackend(cli_path=fake_cli, exclusive_operator=True)
+     info_calls: list[str] = []
++    events: list[str] = []
+ 
+     def _info(_cli, **kwargs):
+         info_calls.append("info")
++        events.append("info")
+         return "info"
+ 
+     with patch("tools.atk_dl16_headless.list_devices", return_value="Devices (1 found)"), patch(
+@@ -154,6 +156,7 @@
+ 
+     def _popen(cmd, **kwargs):
+         proc = procs.pop(0)
++        events.append("capture_failed" if isinstance(proc, _EarlyFail) else "capture_armed")
+         if isinstance(proc, _EarlyFail):
+             (shot / "atk-dl16-capture.stdout").write_text(
+                 json.dumps(
+@@ -173,8 +176,10 @@
+     ), patch("tools.atk_dl16_headless.time.sleep"):
+         prepared = backend.prepare(shot)
+     assert prepared["launch_attempts"] == 2
+-    assert len(info_calls) == 3  # instrument + 2 launch attempts
+-    assert backend._active is not None
++    assert len(info_calls) == 2  # Instrument preflight + retry warm-up, not first launch.
++    assert events == ["info", "capture_failed", "info", "capture_armed"]
++    assert backend._active is prepared["token"]
++    assert isinstance(prepared["token"]["proc"], _ArmOk)
+ 
+ 
+ def test_collect_materializes_from_mocked_cli(tmp_path: Path):
+@@ -216,10 +221,11 @@
+     def _fake_popen(cmd, **kwargs):
+         return fake_proc
+ 
+-    with patch("tools.atk_dl16_headless.device_info", return_value="info"), patch(
++    with patch("tools.atk_dl16_headless.device_info", return_value="info") as info_mock, patch(
+         "tools.atk_dl16_headless.subprocess.Popen", side_effect=_fake_popen
+     ), patch("tools.atk_dl16_headless.time.sleep"):
+         prepared = backend.prepare(shot)
++        info_mock.assert_not_called()
+         out_root = Path(prepared["token"]["out_root"])
+         cap = out_root / "cap_1"
+         cap.mkdir()
+@@ -262,3 +268,105 @@
      fake.write_bytes(b"MZ")
      monkeypatch.setenv("ATK_DL16_CLI", str(fake))
      assert resolve_atk_dl16_cli() == fake.resolve()
@@ -541,8 +595,8 @@
 @@ -0,0 +1,33 @@
 +# DL16-TASK-065 — headless 触发原点 / session 裁剪（2026-10-11）
 +
-+**交接：BLOCKED（完整指定测试命令）；裁剪离线结论 PASS；物理产品结论 UNVERIFIED，HIL_NOT_RUN。**
-+主仓基线 `a1265070a513191669327b8ef241c664df480846`。已有大量 dirty 改动及未跟踪目标文件，未提交/覆盖他人工作；本任务增量另存于 DL16 仓 `scripts/patches/metro-headless-trigger-origin.patch`，提交标识 DL16-TASK-065。Controller/ACTIVE_TASK、FC、固件、B6、STALE_RESETS、S5Q 均未修改；硬件动作全为 0。
++**交接：DONE；完整指定测试及裁剪离线结论 PASS；物理产品结论 UNVERIFIED，HIL_NOT_RUN。**
++主仓基线 `a1265070a513191669327b8ef241c664df480846`。已有大量 dirty 改动及未跟踪目标文件，未提交/覆盖他人工作；本任务增量另存于 DL16 仓 `scripts/patches/metro-headless-trigger-origin.patch`，提交标识 DL16-TASK-065。Controller/ACTIVE_TASK、FC、固件、B6 运行时、STALE_RESETS、S5Q 均未修改；仅校正 B6 离线 mock 的过时断言并加强调用顺序验证；硬件动作全为 0。
 +
 +## 裁剪公式和边界
 +
@@ -565,10 +619,10 @@
 +python artifacts\DL16-TASK-065\replay_trigger_origin.py --output artifacts\DL16-TASK-065\replay-new
 +```
 +
-+- 两文件命令：**FAIL，62 passed / 1 failed**；失败 `test_prepare_retries_protocol_error_then_arms` 是 B6 基线不一致（info 次数期望 3/实际 2），原始源码+测试已复现，本次未改。
-+- 加 edge-policy、paired-validation、replay、export 的范围回归，仅显式排除上述基线失败：**PASS，190 passed / 1 deselected**。0/10/50%、1/10/20 MHz、offset-only、非 byte 边界、预滚不足、短深度、元数据错误、空/多/迟边沿以及 1 µs 门槛均有测试。
++- 两文件命令：**PASS，63 passed / 0 failed**（无跳过/排除）。初次 B6 mock 断言失败原样保留；现按未改动的运行时契约锁定事件 `info,capture_failed,info,capture_armed`：仪器预检一次，仅失败重试 warm-up 一次，首次成功 launch 不调用 info。不是放宽 FC/测量门槛，也未修 B6 运行时。
++- 加 edge-policy、paired-validation、replay、export 的完整相关回归：**PASS，191 passed / 0 failed**（无跳过/排除）。0/10/50%、1/10/20 MHz、offset-only、非 byte 边界、预滚不足、短深度、元数据错误、空/多/迟边沿以及 1 µs 门槛均有测试。
 +- 冻结 G2 shot1 只读复算：不裁 **FAIL**（两通道 late=[2000000]）；裁后 **PASS**（各 [2000]、delta=0.0、measurement_valid=true），与 R2 shot1 几何一致；FAIL/R2 所有文件 SHA-256 前后不变。只复算波形及已归档 ARM/STATUS，不重授硬件授权，不重写历史 verdict，不宣称完整物理证据包重新认证。
-+- 精确命令/输出、基线、来源哈希在 [新任务证据](../../artifacts/DL16-TASK-065/)，结果 [replay.json](../../artifacts/DL16-TASK-065/replay-001/replay.json)。定向 compileall PASS，编辑器诊断无错误。
++- 精确命令/输出、基线、来源哈希在 [新任务证据](../../artifacts/DL16-TASK-065/)，最终结果 [replay.json](../../artifacts/DL16-TASK-065/replay-002/replay.json)。定向 compileall PASS，编辑器诊断无错误。
 +
 +**验收口令：给定 trigger_position=10% 的 headless raw，不改 first_window 阈值，materialize 后 metro_first_window 对 CH3/CH7 均为窗内单边沿；离线测试锁定该行为；未宣称物理 ≤1 µs 产品通过。**
-+下一步：Controller 另案处置 B6 测试/实现不一致，随后独立 Reviewer 验收本增量；live 仍需新授权。
++下一步：独立 Reviewer 验收本增量；B6 运行时可靠性仍为另案，live 仍需新授权。
