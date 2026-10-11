@@ -53,6 +53,8 @@ def decode_uart(wave: Waveform, *, baud_rate: int = 115200, data_bits: int = 8,
     if n < 2:
         return []
     samples_per_bit = wave.sample_rate_hz / baud_rate
+    if not np.isfinite(samples_per_bit) or samples_per_bit < 2:
+        raise AnalysisError("UART requires at least two samples per bit")
     parity_bits = 0 if parity == "none" else 1
     frame_bits = 1 + data_bits + parity_bits + stop_bits
     falling = np.flatnonzero(line[:-1] & ~line[1:]) + 1
