@@ -141,7 +141,7 @@ def test_selftest_partial_pwm_failure_always_stops_and_closes(monkeypatch):
             return {"success": False, "error_code": "SIMULATED"}
         return {"success": True}
     monkeypatch.setattr(service, "logic_pwm", pwm)
-    monkeypatch.setattr(service, "logic_session_close", lambda: calls.append(("close",)) or {"success": True})
+    monkeypatch.setattr(service, "logic_session_close", lambda: calls.append(("close",)) or {"success": True, "closed": True})
     monkeypatch.setattr(service, "logic_capture", lambda **k: pytest.fail("capture should not start"))
     result = service.logic_self_test(confirm_safe_wiring=True)
     assert result["error_code"] == "PWM_CONFIG_FAILED"
@@ -168,7 +168,7 @@ def test_selftest_stream_poll_error_requests_cancel(monkeypatch):
     monkeypatch.setattr(service, "logic_capture", lambda **kw: {"success": True, "capture_id": "buffer"})
     monkeypatch.setattr(service, "logic_measure_pwm",
                         lambda cid, ch: {"frequency_hz_median": 1000 if ch == 8 else 2000})
-    monkeypatch.setattr(service, "logic_session_close", lambda: actions.append("close") or {"success": True})
+    monkeypatch.setattr(service, "logic_session_close", lambda: actions.append("close") or {"success": True, "closed": True})
     monkeypatch.setattr(service, "logic_stream_start", lambda **kw: {"operation_id": "op42"})
     monkeypatch.setattr(service, "logic_stream_poll",
                         lambda operation_id: {"success": False, "error_code": "SIMULATED"})
@@ -216,7 +216,7 @@ def test_selftest_normal_fixture_is_uncalibrated_not_healthy(monkeypatch):
     monkeypatch.setattr(service, "logic_measure_pwm",
                         lambda cid, ch: {"frequency_hz_median": 1000 if ch == 8 else 2000,
                                          "integrity": "INCOMPLETE" if cid == "stream-id" else "COMPLETE"})
-    monkeypatch.setattr(service, "logic_session_close", lambda: {"success": True})
+    monkeypatch.setattr(service, "logic_session_close", lambda: {"success": True, "closed": True})
     monkeypatch.setattr(service, "logic_stream_start", lambda **kw: {"operation_id": "stream-op"})
     monkeypatch.setattr(service, "logic_stream_poll",
                         lambda op: {"state": "finished", "response": {"result": {
