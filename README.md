@@ -2,13 +2,13 @@
 
 An **agent-first, headless MCP** workspace for ALIENTEK ATK-DL16 / DL16 Plus.
 
-> Status: **P0 scaffold / HIL_NOT_RUN**. Python offline CI passes; Windows Server 2022 + VS2022 native C++ compilation, CLI smoke test and upstream synthetic/unit tests (**28/28**) pass ([build evidence](https://github.com/Ryanyntc2013/atk-logic-mcp-dl16/actions/runs/38035288929)). Native USB capture relies on a **pinned GPL-3.0 upstream backend** and **HAS NOT BEEN HARDWARE VERIFIED IN THIS REPOSITORY**. Build success is not a physical HIL pass.
+> Status: **Consolidated release baseline (LOCAL_HIL on DL16 Plus)**. Python offline test suite passes (155 tests); native build and tests pass. Local HIL verified on DL16 Plus (MCU v1.9, FPGA v2.22) for 10-byte trigger gating, pre-trigger position, trigger timeout, multi-channel AND triggers, 20/20 one-shot captures (with B6 mitigation), and 20/20 dual-PWM buffer captures in opt-in persistent session mode (`PASS_WAVEFORM_UNCALIBRATED`). Default backend remains one-shot. Streaming, RLE, and absolute calibration remain unverified.
 
 ## Why this structure?
 
-We intentionally **reuse** mature USB transport, hardware framing, trigger ACK handling, 2048-byte interleaving, buffering and data-integrity checks from [gjjisadog/ATK-Logic-Mcp](https://github.com/gjjisadog/ATK-Logic-Mcp) (pinned to `5fc47744c18c99f9ad0f554a965eb8cd1160c836`) through its CLI. No unverified reimplementation of the USB protocol lives in this project's Python layer.
+We intentionally **reuse** mature USB transport, hardware framing, trigger ACK handling, 2048-byte interleaving, buffering and data-integrity checks from [gjjisadog/ATK-Logic-Mcp](https://github.com/gjjisadog/ATK-Logic-Mcp) (pinned to `5fc47744c18c99f9ad0f554a965eb8cd1160c836`) through its CLI and session worker, augmented by tracked patches. No unverified reimplementation of the USB protocol lives in this project's Python layer.
 
-We add a single MCP entry point with offline `.atkdl` loading and **cross-channel skew / missed-pulse analysis** for 1us-class synchronization experiments. Firmware/capture details are checked against the [official ALIENTEK GUI source](https://github.com/alientek-openedv/atk-logic); decoder design and edge-cases are cross-checked against [sigrokdecode](https://github.com/alientek-openedv/atk_libsigrokdecode) and the community [hugelzhang/atk-logic-mcp](https://github.com/hugelzhang/atk-logic-mcp). The latter two are reference projects, **not** presently embedded as runtime dependencies. See [SOURCES.md](docs/SOURCES.md).
+We add a single MCP entry point with offline `.atkdl` loading, **in-repo deterministic decoders** (UART, I2C, SPI in `src/dl16_mcp/decoders.py`), and **cross-channel skew / missed-pulse analysis** for synchronization experiments. Firmware/capture details are checked against the [official ALIENTEK GUI source](https://github.com/alientek-openedv/atk-logic); decoder design and edge-cases are cross-checked against [sigrokdecode](https://github.com/alientek-openedv/atk_libsigrokdecode) and [hugelzhang/atk-logic-mcp](https://github.com/hugelzhang/atk-logic-mcp). See [SOURCES.md](docs/SOURCES.md).
 
 ## New independent cross-validation (2026-10-10)
 
@@ -51,7 +51,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\setup-windows.ps1
 .\.venv\Scripts\dl16ctl.exe status
 ```
 
-The setup script checks out a PINNED upstream source in ignored `external/ATK-Logic-Mcp/`, compiles the native CLI and runs upstream tests. The native suite includes `test_device_open_hardware` and may open a connected device; do not treat setup/bootstrap as strictly offline. For the current implementation and hardware evidence baseline, start with [LOCAL-HANDOFF](docs/LOCAL-HANDOFF.md).
+The setup script checks out a PINNED upstream source in ignored `external/ATK-Logic-Mcp/`, applies tracked repo patches, compiles the native CLI and stages `libusb-1.0.dll` alongside `atk-dl16.exe`. This native binary deployment is required for hardware capture, 10-byte trigger gating, and session worker execution. The native suite includes `test_device_open_hardware` and may open a connected device; do not treat setup/bootstrap as strictly offline. For the current implementation and hardware evidence baseline, start with [LOCAL-HANDOFF](docs/LOCAL-HANDOFF.md).
 
 If only offline work is possible, use `-SkipNative` during setup. To build later: `powershell -File .\scripts\bootstrap-native.ps1`.
 
@@ -88,17 +88,19 @@ For Cursor, add to `.cursor/mcp.json` or the user's MCP settings, with a **full 
 
 `DL16_CLI_PATH` can override the native executable location; `DL16_DATA_DIR` sets the storage root, by default `./artifacts`. Prefer absolute paths in Agent sessions.
 
-### Experimental session evidence (DL16-TASK-020)
+### Persistent session mode (DL16-TASK-032)
 
-One-shot remains the default. Persistent capture (`DL16_BACKEND_MODE=session`) is experimental and has not passed corrected-channel HIL. Keep the B6 one-shot retry; do not use a cached session status as a fresh FPGA query.
+One-shot remains the default capture mode, with narrow B6 retry mitigation retained for FPGA device-info open failures. Persistent capture is available as an explicit opt-in via `DL16_BACKEND_MODE=session` and `DL16_EXPERIMENTAL_SESSION_LIFECYCLE=depth-stop-v1`.
 
-For the validated long-session buffer path, also set `DL16_EXPERIMENTAL_SESSION_LIFECYCLE=depth-stop-v1`. This remains explicit opt-in: default one-shot and its B6 mitigation are unchanged. Same-owner dual-PWM dynamic acceptance passed 20/20 on the recorded Plus firmware baseline; calibrated timing, other models and arbitrary trigger profiles are not certified. Native PWM setup is a bounded JSONL command, not an additional MCP tool. See [TASK-032](docs/tasks/DL16-TASK-032-single-owner-long-session.md).
+Dynamic acceptance of the single-owner long-session buffer path passed **20/20** consecutive runs on DL16 Plus (MCU v1.9, FPGA v2.22) with simultaneous 1 kHz / 2 kHz dual-PWM signals on CH8 / CH14 (`PASS_WAVEFORM_UNCALIBRATED`). Calibrated timing, continuous streaming, RLE, and untested hardware revisions remain uncertified. Controlled PWM is exposed via logic_pwm with explicit safe-wiring confirmation and session capability validation; logic_session_close cleans owned outputs. See [TASK-032](docs/tasks/DL16-TASK-032-single-owner-long-session.md).
 
-A failed native capture invalidates and closes the session. The failed capture is never replayed; a later explicit operation creates a new worker. Reusing the same native device after a trigger timeout failed in local testing, so seamless in-session timeout recovery is not promised. Close/owned-PWM cleanup errors are surfaced.
+**Failure and recovery semantics:** Any capture timeout or protocol error invalidates and closes the failed native worker without auto-replay or hidden USB reset. A subsequent explicit operation creates a fresh native worker. Seamless in-session timeout recovery is not supported; close and owned-PWM cleanup errors are surfaced.
 
-The optional `DL16_SESSION_JOURNAL_DIR` setting enables local, durable request/response evidence for session mode. Use an absolute path in an ignored task evidence directory. Journal files may contain local paths, native responses and signal metadata: retain originals locally and share only separately redacted summaries. Logging is not raw USB capture, calibration, or proof of physical signal provenance.
+**Cached status semantics:** In persistent session mode, `status` returns cached device descriptors and state captured during worker initialization rather than querying the FPGA over USB on every call.
 
-See [TASK-020 acceptance and hardware gate](docs/tasks/DL16-TASK-020-session-evidence-journal.md) and [TASK-021 bounded corrected-channel smoke](docs/tasks/DL16-TASK-021-corrected-session-smoke.md). Setting logging options does not authorize hardware access; current device connection, safe wiring and voltage must be confirmed before live commands.
+The optional `DL16_SESSION_JOURNAL_DIR` setting enables local, durable request/response evidence for session mode. Use an absolute path in an ignored task evidence directory. Journal files record host declarations, native responses, and signal metadata. Logging is host-side evidence, not raw USB traffic or calibration certification.
+
+See [TASK-020 session journal](docs/tasks/DL16-TASK-020-session-evidence-journal.md) and [TASK-032 single-owner acceptance](docs/tasks/DL16-TASK-032-single-owner-long-session.md). Setting logging options does not authorize hardware access; device connection, safe wiring and voltage must be confirmed before live commands.
 
 ### Local capture example (ONLY with known safe wiring)
 
@@ -116,7 +118,7 @@ See [TASK-020 acceptance and hardware gate](docs/tasks/DL16-TASK-020-session-evi
 
 | Tool | Status | Description |
 |---|---|---|
-| `logic_status` | Native adapter | Device identification, firmware, USB state |
+| `logic_status` | Native adapter (cached in session mode) | Device identification, firmware, USB state |
 | `logic_capture` | Native adapter; gating/position HIL-verified | Bounded buffer capture; edge/level and multi-channel AND triggers gate (10-byte payload); `trigger_position_percent` sets pre-trigger |
 | `logic_inspect` | Offline tested | Preview 1..1000 edges with sample/time indices |
 | `logic_measure_skew` | Offline tested | Signed pairwise delay, P95/P99, missing/extra pulses |
@@ -130,23 +132,24 @@ MCP SDK is deliberately pinned to the v1 maintenance API (`mcp>=1.28,<2`) so the
 
 Full parameter reference, native helper tools and evidence tiers: [docs/MCP-TOOLS.md](docs/MCP-TOOLS.md).
 
-No `send_raw`, firmware flash, driver installation, undocumented MCU write, or automatically invoked power cycling tool exists in the MCP interface.
+Controlled PWM and explicit session close are exposed through MCP/CLI (TASK-034). Safe wiring confirmation and session backend are required; physical output must be measured separately. Real MCP stdio setup/capture/measurement/close passed on the recorded device.
 
 ## Quality model
 
 - `NOT_EVALUATED`: absent/insufficient waveform or not verified as complete.
-- `PASS_WAVEFORM`: signed timing error stayed in bounds **and** no unmatched pulses; numeric waveform conclusion only.
+- `PASS_WAVEFORM`: signed timing error stayed in bounds **and** no unmatched pulses; numeric waveform conclusion only (`PASS_WAVEFORM_UNCALIBRATED`).
 - `FAIL_WAVEFORM`: tolerance exceeded or missing/extra pulses in complete captures.
-- `HIL_PASS`: **NOT ISSUED BY THIS SCAFFOLD**; requires operator-confirmed wiring, independent instrumentation and archived real capture evidence.
+- `HIL_PASS`: **NOT ISSUED** without independent instrument calibration, operator-confirmed wiring, and archived physical capture evidence.
 
 Native captured bytes and metadata remain in `artifacts/captures/<capture_id>/`, excluded from Git by default. Avoid committing customer signals or serial/device IDs.
 
 ## Roadmap
 
-- **P0 (this revision):** repo, agent rules, pinned native bootstrap, MCP gateway, no-hardware tests, basic decoder adapter, vendor `.atkdl` offline loading, skew measurements.
-- **P1 (local hardware required):** USB enumeration, verified buffered capture at 1/20/100/200MHz, real trigger gating, source clock cross-check, repeated-run reliability, firmware-specific channel-count behavior.
-- **P2:** RLE switch end-to-end, cancellable capture, timeouts in native API, direct `.atkdl` export, configurable pre-trigger ratio and bounded multi-condition triggers, enhanced signal-quality metrics.
-- **P3:** optional sigrok protocol host (`uart→modbus`, `spi→spiflash`, etc.), RF-lens custom decoders, calibration and manufacturing HIL reporting.
+User approved full roadmap including all features plus exposing controlled PWM as MCP/CLI:
+- **Phase 1 (Consolidated baseline — DL16-TASK-033):** repo, deterministic offline analysis, in-repo UART/I2C/SPI decoders, 10-byte trigger gating, position alignment, timeout, AND triggers, 20/20 one-shot captures (B6 retry), opt-in persistent buffer session with 20/20 dual PWM (`PASS_WAVEFORM_UNCALIBRATED`).
+Controlled PWM and explicit session close are exposed through MCP/CLI (TASK-034). Safe wiring confirmation and session backend are required; physical output must be measured separately. Real MCP stdio setup/capture/measurement/close passed on the recorded device.
+- **Phase 3 (Future):** RLE switch end-to-end, streaming capture, direct `.atkdl` export, multi-device arbitration, and external sigrok protocol host adapter.
+- **Phase 4 (Future):** calibrated timestamp accuracy against reference instruments, RF-lens decoders, and manufacturing HIL certification.
 
 For what to do next in Codex, see [`AGENTS.md`](AGENTS.md) and [`docs/LOCAL-HANDOFF.md`](docs/LOCAL-HANDOFF.md).
 

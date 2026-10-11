@@ -264,3 +264,45 @@ def capture(request: CaptureRequest, timeout_s: float = 45.0,
     last_doc.setdefault("warnings", []).append(
         f"open-retry exhausted after {MAX_ATTEMPTS} attempts")
     return last_doc
+
+
+def pwm(output: int, action: str = "configure", frequency_hz: int = 1000,
+        duty_percent: float = 50.0, confirm_safe_wiring: bool = False) -> dict[str, Any]:
+    import math
+    if not confirm_safe_wiring:
+        return {"success": False, "error_code": "PWM_CONFIRMATION_REQUIRED",
+                "message": "Explicit safe output wiring/voltage confirmation required"}
+    if (type(output) is not int or output not in (0, 1) or action not in ("configure", "stop")
+            or (action == "configure" and (type(frequency_hz) is not int or not 1 <= frequency_hz <= 20000000
+                or isinstance(duty_percent, bool) or not isinstance(duty_percent, (int, float))
+                or not math.isfinite(duty_percent) or not 0 <= duty_percent <= 100))):
+        return {"success": False, "error_code": "INVALID_PWM"}
+    if not _session_enabled():
+        return {"success": False, "error_code": "SESSION_MODE_REQUIRED",
+                "message": "PWM requires explicit session backend for single-owner configuration/capture"}
+    cli = find_native_cli()
+    if cli is None:
+        return {"success": False, "error_code": "CLI_MISSING"}
+    request = {"command": "pwm", "op": action, "output": output}
+    if action == "configure":
+        request.update(frequency_hz=frequency_hz, duty_percent=duty_percent)
+    try:
+        response = _get_session(cli).request(request, timeout_s=10)
+        return {"success": True, "backend": "native-session", "response": response,
+                "physical_output_verified": False}
+    except SessionFailure as exc:
+        return {"success": False, "error_code": exc.code, "message": str(exc)}
+
+
+def close_session() -> dict[str, Any]:
+    global _SESSION, _SESSION_PATH
+    with _SESSION_LOCK:
+        session, _SESSION = _SESSION, None
+        _SESSION_PATH = None
+    if session is None:
+        return {"success": True, "closed": False}
+    try:
+        session.close()
+        return {"success": True, "closed": True}
+    except SessionFailure as exc:
+        return {"success": False, "closed": True, "error_code": exc.code, "message": str(exc)}

@@ -9,7 +9,9 @@ REAL_HARDWARE sources stay distinct.
 
 | Tool | Mode | Summary |
 |---|---|---|
-| `logic_status` | native (read-only) | Device model, firmware, USB speed, channel count, backend readiness. |
+| `logic_pwm` | native (output; explicit confirmation) | Configure/stop one owned PWM output in the persistent session. |
+| `logic_session_close` | native lifecycle | Close owned session/PWM with observable cleanup errors. |
+| `logic_status` | native (read-only) | Device model, firmware, USB speed, channel count, backend readiness; session metadata is cached. |
 | `logic_capture` | native (buffer only) | Bounded capture to disk; returns integrity/ACK/complete flags and artifact dir. |
 | `logic_inspect` | offline | Preview up to N edges with sample/time indices. |
 | `logic_measure_skew` | offline | Signed pairwise delay, P95/P99, missing/extra pulses, waveform verdict. |
@@ -37,8 +39,9 @@ REAL_HARDWARE sources stay distinct.
 - `dl16-pwm.exe` — bounded PWM0/PWM1 start/stop sender (`0x17`), operator-gated.
 - `dl16-trigger.exe` — bounded SimpleTrigger gating probe (9B/10B payload), operator-gated.
 
-PWM output is **deliberately not an MCP tool**: it drives pins and stays a reviewed,
-operator-invoked helper. No `send_raw`, firmware, bootloader or driver tool exists.
+PWM output is now exposed as `logic_pwm(output, action="configure"|"stop", frequency_hz=1000, duty_percent=50, confirm_safe_wiring=false)`. It requires explicit safe-wiring confirmation, `DL16_BACKEND_MODE=session`, and native hello advertising `pwm`. Range: outputs 0/1, integer 1..20 MHz, finite duty 0..100%. A successful transfer does not prove physical output. Configure multiple outputs and capture within the same persistent owner; `logic_session_close()` stops owned outputs and surfaces cleanup failures.
+
+CLI: `dl16ctl pwm configure --output 0 --frequency-hz 1000 --duty-percent 50 --confirm-safe-wiring`, `dl16ctl pwm stop --output 0 --confirm-safe-wiring`, `dl16ctl session-close`. Standalone CLI exit closes its owner and stops owned outputs; use persistent MCP/native JSONL for setup followed by capture. No `send_raw`, firmware, bootloader or driver tool exists.
 
 ## Output discipline
 

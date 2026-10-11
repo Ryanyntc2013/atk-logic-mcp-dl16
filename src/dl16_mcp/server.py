@@ -8,6 +8,22 @@ mcp = FastMCP("atk-logic-mcp-dl16")
 
 
 @mcp.tool()
+def logic_pwm(output: int, action: str = "configure", frequency_hz: int = 1000,
+              duty_percent: float = 50.0, confirm_safe_wiring: bool = False) -> dict:
+    """Drive a confirmed safe PWM output in the owned session; no raw commands.
+
+    A successful write does not verify physical output. Session close stops owned outputs.
+    """
+    return service.logic_pwm(output, action, frequency_hz, duty_percent, confirm_safe_wiring)
+
+
+@mcp.tool()
+def logic_session_close() -> dict:
+    """Close the owned native session and stop its owned PWM outputs; never replay capture."""
+    return service.logic_session_close()
+
+
+@mcp.tool()
 def logic_status() -> dict:
     """Query connected ATK-DL16/DL16 Plus and native backend readiness."""
     return service.logic_status()

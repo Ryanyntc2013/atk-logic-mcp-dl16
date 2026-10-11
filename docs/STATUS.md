@@ -1,4 +1,4 @@
-# Release status 鈥?P0 scaffold, updated 2026-10-10
+# Release status — Consolidated baseline, updated 2026-10-11 (DL16-TASK-033)
 
 ## Source of truth
 
@@ -8,7 +8,14 @@
 
 ## Independently executed checks
 
-- Python offline suite: 69 passing tests on local Python 3.12 (core + DL16-TASK-002/004/005 protocol vectors and export); GitHub Actions Python offline CI successful.
+- Python test suite: 155 passing tests on local Python 3.12 (core, protocol vectors, in-repo decoders, MCP server, journal, session lifecycle, failure boundaries, PWM codec); `compileall` clean.
+- In-repo decoders: `src/dl16_mcp/decoders.py` implements offline UART, I2C, SPI (modes 0-3, bit order) directly in-repo; `logic_decode` does not require external checkout at runtime.
+- Long-session buffer capture (DL16-TASK-032, LOCAL_HIL): opt-in `depth-stop-v1` lifecycle under single native owner (`DL16_BACKEND_MODE=session`, `DL16_EXPERIMENTAL_SESSION_LIFECYCLE=depth-stop-v1`); same-owner diagnostic PWM configuration (1 kHz / 2 kHz on CH8 / CH14, 50% duty); 20/20 consecutive captures verified with exact sample counts (200,000 samples/ch) and numeric frequency/duty verdicts (`PASS_WAVEFORM_UNCALIBRATED`).
+- Session failure & recovery semantics: capture timeout or protocol failure invalidates and closes the failed native owner without auto-replay or hidden fallback; a subsequent explicit operation spawns a fresh native worker.
+- Cached session status semantics: in persistent session mode, `status` returns cached startup device properties rather than issuing a fresh live FPGA query.
+- Default mode and B6 mitigation: default backend remains one-shot with narrow B6 retry mitigation (up to 3 attempts, 0.5s/1.0s backoff for FPGA device-info open failures).
+- Native deployment prerequisite: requires patched native binary `atk-dl16.exe` and `libusb-1.0.dll` built via `scripts/bootstrap-native.ps1` (applying tracked patches onto pinned upstream `5fc47744`).
+Controlled PWM and explicit session close are exposed through MCP/CLI (TASK-034). Safe wiring confirmation and session backend are required; physical output must be measured separately. Real MCP stdio setup/capture/measurement/close passed on the recorded device.
 - DL16-TASK-002 Phase A: independent offline protocol reference + byte-level vectors + hash-locked golden artifact; optional native harness confirms the pinned C++ backend matches the Python reference byte-for-byte (protocol frames and RX parsing). Preserved 9B/10B trigger and 25/500 MHz index conflicts. See `docs/research/DL16-TASK-002-phase-a-protocol-vectors.md`.
 - DL16-TASK-004 PWM output: offline codec for commands `0x17` (start/stop, 200 MHz counter, channels 0..1) implemented and tested; **LOCAL_HIL on this device** for PWM0->CH0 (100 Hz..20 MHz) and PWM1->CH6 (1 kHz). See `docs/research/DL16-TASK-002-pwm-output.md`.
 - DL16-TASK-005 LHX feature adoption: `logic_export` (edge-based VCD / edge-CSV) added offline and exposed via MCP + `dl16ctl export`; roadmap in `docs/research/DL16-TASK-005-lhx-feature-adoption.md`.
@@ -58,22 +65,25 @@
 - Pinned `bootstrap-native.ps1` now defaults `-Toolset` to the locally installed VS2019 toolset (`v142`) and falls back to the machine default (`v143`) with a warning when it is absent. `-Toolset auto` forces the CMake default.
 - The bundled libusb static library is compiled with a NEWER MSVC (front-end 19.39+); local toolsets older than that cannot link it (`LINK : fatal error C1900` Il mismatch, `P1=20240319` constant). The script links the libusb **DLL import library** and stages `libusb-1.0.dll` next to the executables; the pinned commit content is unchanged. Details: `docs/tasks/DL16-TASK-003.md`.
 
-## Local hardware observed (2026-10-10, this workstation, not CI)
+## Local hardware observed (consolidated, DL16 Plus baseline)
 
 Consolidated Phase B / HIL scoreboard: `docs/HIL-PHASE-B-STATUS.md`.
 
-- `1a86:ffcc` enumerated; `info` reports **DL16 Plus**, 16 channels, USB 2.0, MCU v1.9, FPGA v2.22.
-- Bounded `buffer` capture (CH0, immediate trigger, 20 MHz, 20 ms, 1.6 V) returned `evidence_source=REAL_HARDWARE`, `data_integrity=COMPLETE`, `trigger_ack_received=true`, `capture_complete_received=true`, 400000 samples/channel. Raw artifact kept locally (ignored).
-- **HIL_PASS is NOT issued**: no independent-instrument comparison and no real trigger-gating test were performed; these remain `HIL_NOT_RUN`.
+- Historical initial check (2026-10-10): `1a86:ffcc` enumerated; DL16 Plus, MCU v1.9, FPGA v2.22, 16 channels, initial CH0 buffer capture.
+- Consolidated HIL gates: 10-byte SimpleTrigger gating (DL16-TASK-010/011), trigger position alignment (DL16-TASK-012/013), trigger timeout (DL16-TASK-015), multi-channel AND triggers (DL16-TASK-014/017), 20/20 one-shot repeatability with B6 retry mitigation (DL16-TASK-018), and 20/20 dual-PWM buffer captures in opt-in persistent session mode (`PASS_WAVEFORM_UNCALIBRATED`, DL16-TASK-032).
+- Hardware evidence tiers: `REAL_HARDWARE` records hardware source, but numeric waveform results do not constitute calibrated instrument certification.
 
-## NOT yet verified
+## NOT yet verified / Out of scope
 
-- No DL16 is attached to GitHub-hosted runner: **USB enumeration, real capture, trigger behavior and hardware data integrity are not validated**.
-- No demonstrated full Windows Python MCP handshake + native USB device end-to-end session; a CLI help smoke test does not prove live capture.
-- MCP wire-protocol handshake test was skipped in the initial authoring environment without MCP SDK. CI Python dependencies and tests pass, but this is not a physical MCP/device integration test.
-- RLE, stream, calibrated timestamp accuracy, complex triggers and full sigrok PD breadth are not claimed as supported.
-- Cross-channel physical timestamp alignment/uncertainty must be verified with a known split signal and reference scope.
+- No DL16 is attached to GitHub-hosted runner: cloud CI validates offline tests and build only, never physical hardware.
+- RLE compression and continuous streaming capture are NOT supported or verified.
+- Sub-microsecond absolute timestamp calibration and physical skew uncertainty against independent reference instruments are NOT certified.
+- Arbitrary trigger profiles and non-tested hardware/firmware revisions remain unverified.
 
-## Release criterion
+## Release baseline summary
 
-Status remains **P0/SCAFFOLD / HIL_NOT_RUN** until `DL16-TASK-001` documents hardware capture, stable MCP startup and physical skew results. C++ compilation and synthetic tests passing are distinct from HIL certification.
+Buffer capture baseline is consolidated and tested for DL16 Plus (MCU v1.9, FPGA v2.22).
+- **Default backend**: one-shot mode with narrow B6 retry mitigation.
+- **Opt-in persistent session**: buffer capture with `depth-stop-v1` lifecycle; timeout/error invalidates and closes failed worker; next explicit request creates a fresh worker; status returns cached startup state.
+- **Native deployment**: requires patched native CLI binary `atk-dl16.exe` and `libusb-1.0.dll` built via `scripts/bootstrap-native.ps1`.
+Controlled PWM and explicit session close are exposed through MCP/CLI (TASK-034). Safe wiring confirmation and session backend are required; physical output must be measured separately. Real MCP stdio setup/capture/measurement/close passed on the recorded device.

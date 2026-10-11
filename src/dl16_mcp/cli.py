@@ -8,6 +8,13 @@ def main() -> int:
     p = argparse.ArgumentParser(prog="dl16ctl")
     cmd = p.add_subparsers(dest="command", required=True)
     cmd.add_parser("status")
+    cmd.add_parser("session-close")
+    pwm = cmd.add_parser("pwm")
+    pwm.add_argument("action", choices=["configure", "stop"])
+    pwm.add_argument("--output", type=int, required=True)
+    pwm.add_argument("--frequency-hz", type=int, default=1000)
+    pwm.add_argument("--duty-percent", type=float, default=50)
+    pwm.add_argument("--confirm-safe-wiring", action="store_true")
     c = cmd.add_parser("capture")
     c.add_argument("--channels", default="0,1")
     c.add_argument("--sample-rate-hz", type=int, default=20_000_000)
@@ -41,6 +48,11 @@ def main() -> int:
     args = p.parse_args()
     if args.command == "status":
         result = service.logic_status()
+    elif args.command == "pwm":
+        result = service.logic_pwm(args.output, args.action, args.frequency_hz,
+                                   args.duty_percent, args.confirm_safe_wiring)
+    elif args.command == "session-close":
+        result = service.logic_session_close()
     elif args.command == "capture":
         result = service.logic_capture([int(x.strip()) for x in args.channels.split(",")],
                                        args.sample_rate_hz, args.duration_ms, args.threshold,

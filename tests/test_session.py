@@ -34,7 +34,7 @@ for line in sys.stdin:
         print(json.dumps({"request_id":"wrong","ok":True}), flush=True)
         continue
     if command == "hello":
-        print(json.dumps({"request_id":req["request_id"],"ok":True,"protocol":1}), flush=True)
+        print(json.dumps({"request_id":req["request_id"],"ok":True,"protocol":1,"commands":["capture","status","pwm","close"]}), flush=True)
     elif command == "status":
         print(json.dumps({"request_id":req["request_id"],"ok":True,"session":"ready"}), flush=True)
     elif command == "capture":

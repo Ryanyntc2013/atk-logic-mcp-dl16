@@ -3,6 +3,8 @@ import asyncio
 from dl16_mcp import server
 
 EXPECTED_TOOLS = {
+    "logic_pwm",
+    "logic_session_close",
     "logic_status",
     "logic_capture",
     "logic_inspect",

@@ -186,3 +186,12 @@ def logic_decode(capture_id: str, protocol: str, channels: list[int],
                 "data_integrity": waves[0].integrity}
     except (ValueError, FileNotFoundError, OSError, KeyError) as exc:
         return {"success": False, "error_code": "DECODE_FAILED", "message": str(exc)}
+
+
+def logic_pwm(output: int, action: str = "configure", frequency_hz: int = 1000,
+              duty_percent: float = 50.0, confirm_safe_wiring: bool = False) -> dict[str, Any]:
+    return backend.pwm(output, action, frequency_hz, duty_percent, confirm_safe_wiring)
+
+
+def logic_session_close() -> dict[str, Any]:
+    return backend.close_session()

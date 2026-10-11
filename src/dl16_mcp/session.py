@@ -41,6 +41,7 @@ class NativeSession:
         self._failed = False
         self._closed = False
         self._hello = False
+        self.capabilities: set[str] = set()
         self._observer = observer
         journal_dir = os.environ.get("DL16_SESSION_JOURNAL_DIR")
         self._journal = SessionJournal(Path(journal_dir).expanduser()) if journal_dir else None
@@ -92,7 +93,9 @@ class NativeSession:
                 self._invalidate()
                 raise SessionFailure("SESSION_START_FAILED", "native session pipes were not created")
             threading.Thread(target=self._read_stdout, name="dl16-session-stdout", daemon=True).start()
-            self._request_locked({"command": "hello", "protocol": 1}, timeout_s=5.0)
+            hello = self._request_locked({"command": "hello", "protocol": 1}, timeout_s=5.0)
+            commands = hello.get("commands", [])
+            self.capabilities = {c for c in commands if isinstance(c, str)} if isinstance(commands, list) else set()
             self._hello = True
         except SessionFailure:
             self._invalidate()
@@ -244,6 +247,8 @@ class NativeSession:
             self._start()
             if not self._hello:
                 raise SessionFailure("SESSION_PROTOCOL_ERROR", "native hello handshake missing")
+            if request.get("command") == "pwm" and "pwm" not in self.capabilities:
+                raise SessionFailure("NATIVE_CAPABILITY_MISSING", "native hello does not advertise PWM; rebuild patched CLI")
             return self._request_locked(request, timeout_s=timeout_s)
 
     def _invalidate(self) -> None:
