@@ -1,0 +1,384 @@
+--- a/cli/main.cpp
++++ b/cli/main.cpp
+@@ -4,6 +4,7 @@
+ #include "atkdl16/sample_store.h"
+ #include "atkdl16/json_util.h"
+ #include "session_protocol.h"
++#include "async_dispatcher.h"
+ #include <algorithm>
+ #include <iostream>
+ #include <string>
+@@ -88,20 +89,21 @@
+ }
+ static bool session_line(std::istream& in,std::string& line,bool& oversized){constexpr size_t max=65536;line.clear();oversized=false;bool any=false;char c;while(in.get(c)){any=true;if(c=='\n')return true;if(line.size()<max)line.push_back(c);else oversized=true;}return any;}
+ 
+-static int run_session_jsonl(){
++static int run_session_owner(session::AsyncDispatcher* dispatcher=nullptr){
++    auto emit=[&](const std::string& text){ if(dispatcher) dispatcher->emit(text); else std::cout<<text<<std::flush; };
+     Device dev; bool opened=false; std::string line; bool oversized=false;
+     std::set<int> owned_pwm;
+-    while(session_line(std::cin,line,oversized)){
+-        if(oversized){std::cout<<session::error_response("","LINE_TOO_LARGE","JSONL line exceeds 65536 bytes")<<std::flush;continue;}
+-        if(line.empty()){std::cout<<session::error_response("","EMPTY_REQUEST","empty JSONL request")<<std::flush;continue;}
++    while(dispatcher ? dispatcher->next(line) : session_line(std::cin,line,oversized)){
++        if(oversized){emit(session::error_response("","LINE_TOO_LARGE","JSONL line exceeds 65536 bytes"));continue;}
++        if(line.empty()){emit(session::error_response("","EMPTY_REQUEST","empty JSONL request"));continue;}
+         session::Value req;std::string error;session::Parser parser(line);
+-        if(!parser.parse(req,error)){std::cout<<session::error_response("","INVALID_JSON",error)<<std::flush;continue;}
++        if(!parser.parse(req,error)){emit(session::error_response("","INVALID_JSON",error));continue;}
+         std::string id,cmd;
+-        if(!session::get_string(req,"request_id",id)||id.empty()||id.size()>128){std::cout<<session::error_response("","INVALID_REQUEST_ID","request_id must be 1..128 bytes")<<std::flush;continue;}
+-        if(!session::get_string(req,"command",cmd)){std::cout<<session::error_response(id,"INVALID_COMMAND","command must be a string")<<std::flush;continue;}
++        if(!session::get_string(req,"request_id",id)||id.empty()||id.size()>128){emit(session::error_response("","INVALID_REQUEST_ID","request_id must be 1..128 bytes"));continue;}
++        if(!session::get_string(req,"command",cmd)){emit(session::error_response(id,"INVALID_COMMAND","command must be a string"));continue;}
+         if(cmd=="hello"){
+-            int version=0;if(!session::get_integer(req,"protocol",version)||version!=1){std::cout<<session::error_response(id,"UNSUPPORTED_PROTOCOL","protocol must equal 1")<<std::flush;continue;}
+-            std::cout<<session::response(id,"\"ok\":true,\"protocol\":1,\"native_version\":\"1.0.0\",\"commands\":[\"status\",\"capture\",\"pwm\",\"close\",\"raw_rx_log_v1\"]")<<std::flush;continue;
++            int version=0;if(!session::get_integer(req,"protocol",version)||version!=1){emit(session::error_response(id,"UNSUPPORTED_PROTOCOL","protocol must equal 1"));continue;}
++            emit(session::response(id,"\"ok\":true,\"protocol\":1,\"native_version\":\"1.0.0\",\"commands\":[\"status\",\"capture\",\"pwm\",\"close\",\"raw_rx_log_v1\",\"async_buffer_v1\"]"));continue;
+         }
+         if(cmd=="close") {
+             bool cleanup_failed=false;
+@@ -120,76 +122,78 @@
+             owned_pwm.clear();
+             if(opened)dev.close();
+             if(cleanup_failed){
+-                std::cout<<session::error_response(id,"CLEANUP_FAILED","failed to stop session PWM outputs: "+cleanup_err)<<std::flush;
++                emit(session::error_response(id,"CLEANUP_FAILED","failed to stop session PWM outputs: "+cleanup_err));
+             } else {
+-                std::cout<<session::response(id,"\"ok\":true,\"session\":\"closing\"")<<std::flush;
++                emit(session::response(id,"\"ok\":true,\"session\":\"closing\""));
+             }
+             return 0;
+         }
+-        if(cmd!="status"&&cmd!="capture"&&cmd!="pwm"){std::cout<<session::error_response(id,"UNKNOWN_COMMAND","unsupported command")<<std::flush;continue;}
++        if(cmd!="status"&&cmd!="capture"&&cmd!="pwm"){emit(session::error_response(id,"UNKNOWN_COMMAND","unsupported command"));continue;}
+         if(cmd=="pwm"){
+             std::string op; int output_ch=-1, freq_hz=0; double duty=0.0;
+-            if(!session::get_string(req,"op",op)){std::cout<<session::error_response(id,"INVALID_PWM","missing or invalid op")<<std::flush;continue;}
+-            if(!session::get_integer(req,"output",output_ch)){std::cout<<session::error_response(id,"INVALID_PWM","missing or invalid output channel")<<std::flush;continue;}
++            if(!session::get_string(req,"op",op)){emit(session::error_response(id,"INVALID_PWM","missing or invalid op"));continue;}
++            if(!session::get_integer(req,"output",output_ch)){emit(session::error_response(id,"INVALID_PWM","missing or invalid output channel"));continue;}
+             if(op=="configure"){
+-                if(!session::get_integer(req,"frequency_hz",freq_hz)){std::cout<<session::error_response(id,"INVALID_PWM","missing or invalid frequency_hz")<<std::flush;continue;}
+-                if(!session::get_number(req,"duty_percent",duty)){std::cout<<session::error_response(id,"INVALID_PWM","missing or invalid duty_percent")<<std::flush;continue;}
++                if(!session::get_integer(req,"frequency_hz",freq_hz)){emit(session::error_response(id,"INVALID_PWM","missing or invalid frequency_hz"));continue;}
++                if(!session::get_number(req,"duty_percent",duty)){emit(session::error_response(id,"INVALID_PWM","missing or invalid duty_percent"));continue;}
+             } else if(op!="stop"){
+-                std::cout<<session::error_response(id,"INVALID_PWM","op must be configure or stop")<<std::flush;continue;
++                emit(session::error_response(id,"INVALID_PWM","op must be configure or stop"));continue;
+             }
+             std::vector<uint8_t> payload; std::string payload_err;
+             if(!session::build_pwm_payload(op,output_ch,freq_hz,duty,payload,payload_err)){
+-                std::cout<<session::error_response(id,"INVALID_PWM",payload_err)<<std::flush;continue;
++                emit(session::error_response(id,"INVALID_PWM",payload_err));continue;
+             }
+             if(!opened||!dev.is_open()){
+-                auto e=dev.open();if(!e){opened=false;std::cout<<session::error_response(id,"DEVICE_OPEN_FAILED",e.message)<<std::flush;continue;}opened=true;
++                auto e=dev.open();if(!e){opened=false;emit(session::error_response(id,"DEVICE_OPEN_FAILED",e.message));continue;}opened=true;
+             }
+             auto werr = dev.transport().send_command(CommandCode::PWM, payload.data(), payload.size());
+             if(!werr){
+-                std::cout<<session::error_response(id,"PWM_COMMAND_FAILED",werr.message)<<std::flush;continue;
++                emit(session::error_response(id,"PWM_COMMAND_FAILED",werr.message));continue;
+             }
+             if(op=="configure") owned_pwm.insert(output_ch);
+             else owned_pwm.erase(output_ch);
+             std::string p_hex; for(uint8_t b : payload){ char h[3]; snprintf(h,sizeof(h),"%02x",b); p_hex+=h; }
+-            std::cout<<session::response(id,"\"ok\":true,\"action\":\""+op+"\",\"output\":"+std::to_string(output_ch)+",\"payload\":\""+p_hex+"\"")<<std::flush;
++            emit(session::response(id,"\"ok\":true,\"action\":\""+op+"\",\"output\":"+std::to_string(output_ch)+",\"payload\":\""+p_hex+"\""));
+             continue;
+         }
+         if(cmd=="status"){
+             if(!opened||!dev.is_open()){
+-                auto e=dev.open();if(!e){opened=false;std::cout<<session::error_response(id,"DEVICE_OPEN_FAILED",e.message)<<std::flush;continue;}opened=true;
++                auto e=dev.open();if(!e){opened=false;emit(session::error_response(id,"DEVICE_OPEN_FAILED",e.message));continue;}opened=true;
+             }
+             const auto& x=dev.info();std::ostringstream f;f<<"\"ok\":true,\"session\":\"ready\",\"transport_open\":true,\"device\":{\"model\":\""<<json_escape(x.model_name)<<"\",\"hardware_level\":\""<<(x.device_level==1?"DL16 Plus":"DL16 Standard")<<"\",\"usb_speed\":\""<<(x.usb_speed==UsbSpeed::Usb30?"USB 3.0":"USB 2.0")<<"\",\"mcu_firmware\":\"v"<<(x.mcu_firmware_version/10.0)<<"\",\"fpga_firmware\":\"v"<<(x.fpga_firmware_version/100.0)<<"\",\"channels\":"<<static_cast<int>(x.channel_count)<<"}";
+-            std::cout<<session::response(id,f.str())<<std::flush;continue;
++            emit(session::response(id,f.str()));continue;
+         }
+         CaptureConfig cfg;
+         const char* lifecycle=std::getenv("DL16_EXPERIMENTAL_SESSION_LIFECYCLE");
+         cfg.experimental_session_lifecycle=lifecycle && std::string(lifecycle)=="depth-stop-v1";
+         int duration=0,timeout=30;double rate=0,threshold=1.6,position=cfg.trigger.position_percent;std::string trigger="immediate",out="captures";
+-        if(!session_channels(req,cfg.enabled_channels)||!session::get_integer(req,"duration_ms",duration)||duration<=0||!session_number(req,"sample_rate_hz",rate)||rate<=0||!session_number(req,"threshold_voltage",threshold)){std::cout<<session::error_response(id,"INVALID_CAPTURE","invalid required capture fields")<<std::flush;continue;}
+-        if(const auto* t=session::get(req,"trigger_timeout_sec")){(void)t;if(!session::get_integer(req,"trigger_timeout_sec",timeout)||timeout<1||timeout>3600){std::cout<<session::error_response(id,"INVALID_CAPTURE","trigger_timeout_sec must be 1..3600")<<std::flush;continue;}}
+-        if(const auto* t=session::get(req,"trigger")){if(t->kind!=session::Value::Kind::String){std::cout<<session::error_response(id,"INVALID_CAPTURE","trigger must be a string")<<std::flush;continue;}trigger=t->scalar;}
+-        if(session::get(req,"trigger_position_percent")&&!session_number(req,"trigger_position_percent",position)){std::cout<<session::error_response(id,"INVALID_CAPTURE","trigger_position_percent must be numeric")<<std::flush;continue;}
+-        if(position<0||position>100){std::cout<<session::error_response(id,"INVALID_CAPTURE","trigger position must be 0..100")<<std::flush;continue;}
+-        if(const auto* p=session::get(req,"output_dir")){if(p->kind!=session::Value::Kind::String||p->scalar.empty()){std::cout<<session::error_response(id,"INVALID_CAPTURE","output_dir must be a string")<<std::flush;continue;}out=p->scalar;}
++        if(!session_channels(req,cfg.enabled_channels)||!session::get_integer(req,"duration_ms",duration)||duration<=0||!session_number(req,"sample_rate_hz",rate)||rate<=0||!session_number(req,"threshold_voltage",threshold)){emit(session::error_response(id,"INVALID_CAPTURE","invalid required capture fields"));continue;}
++        if(const auto* t=session::get(req,"trigger_timeout_sec")){(void)t;if(!session::get_integer(req,"trigger_timeout_sec",timeout)||timeout<1||timeout>3600){emit(session::error_response(id,"INVALID_CAPTURE","trigger_timeout_sec must be 1..3600"));continue;}}
++        if(const auto* t=session::get(req,"trigger")){if(t->kind!=session::Value::Kind::String){emit(session::error_response(id,"INVALID_CAPTURE","trigger must be a string"));continue;}trigger=t->scalar;}
++        if(session::get(req,"trigger_position_percent")&&!session_number(req,"trigger_position_percent",position)){emit(session::error_response(id,"INVALID_CAPTURE","trigger_position_percent must be numeric"));continue;}
++        if(position<0||position>100){emit(session::error_response(id,"INVALID_CAPTURE","trigger position must be 0..100"));continue;}
++        if(const auto* p=session::get(req,"output_dir")){if(p->kind!=session::Value::Kind::String||p->scalar.empty()){emit(session::error_response(id,"INVALID_CAPTURE","output_dir must be a string"));continue;}out=p->scalar;}
+         if(session::get(req,"raw_rx_max_bytes") && !session::get(req,"raw_rx_path")) {
+-            std::cout<<session::error_response(id,"INVALID_CAPTURE","raw RX limit requires path")<<std::flush;continue;
++            emit(session::error_response(id,"INVALID_CAPTURE","raw RX limit requires path"));continue;
+         }
+         if(session::get(req,"raw_rx_path")) {
+             int limit=33554432;
+             if(!session::get_string(req,"raw_rx_path",cfg.raw_rx_path)||cfg.raw_rx_path.empty()||
+                (session::get(req,"raw_rx_max_bytes")&&!session::get_integer(req,"raw_rx_max_bytes",limit))||limit<8||limit>33554432||
+                !valid_raw_rx_path(cfg.raw_rx_path)) {
+-                std::cout<<session::error_response(id,"INVALID_CAPTURE","invalid raw RX path/limit")<<std::flush;continue;
++                emit(session::error_response(id,"INVALID_CAPTURE","invalid raw RX path/limit"));continue;
+             }
+             cfg.raw_rx_max_bytes=limit;
+         }
+-        cfg.sample_rate=static_cast<uint64_t>(rate);if(static_cast<double>(cfg.sample_rate)!=rate){std::cout<<session::error_response(id,"INVALID_CAPTURE","sample_rate_hz must be integral")<<std::flush;continue;}
+-        if(!valid_session_trigger(trigger)){std::cout<<session::error_response(id,"INVALID_CAPTURE","trigger syntax is invalid")<<std::flush;continue;}
++        cfg.sample_rate=static_cast<uint64_t>(rate);if(static_cast<double>(cfg.sample_rate)!=rate){emit(session::error_response(id,"INVALID_CAPTURE","sample_rate_hz must be integral"));continue;}
++        if(!valid_session_trigger(trigger)){emit(session::error_response(id,"INVALID_CAPTURE","trigger syntax is invalid"));continue;}
+         cfg.duration_ms=static_cast<uint64_t>(duration);cfg.threshold_voltage=threshold;cfg.mode=CaptureMode::Buffer;cfg.trigger=parse_trigger(trigger);cfg.trigger.position_percent=position;
+         if(!opened||!dev.is_open()){
+-            auto e=dev.open();if(!e){opened=false;std::cout<<session::error_response(id,"DEVICE_OPEN_FAILED",e.message)<<std::flush;continue;}opened=true;
+-        }
+-        CaptureEngine engine(dev);auto result=engine.execute_capture(cfg,out,nullptr,timeout);
++            auto e=dev.open();if(!e){opened=false;emit(session::error_response(id,"DEVICE_OPEN_FAILED",e.message));continue;}opened=true;
++        }
++        cfg.async_buffer=dispatcher && dispatcher->is_operation(id);
++        CaptureEngine engine(dev);
++        auto result=engine.execute_capture(cfg,out,nullptr,timeout,dispatcher && dispatcher->is_operation(id) ? &dispatcher->cancel : nullptr);
+         result.cleanup_stop_attempted=engine.cleanup_stop_attempted();
+         result.cleanup_stop_ok=result.cleanup_stop_attempted && static_cast<bool>(engine.cleanup_stop_result());
+         if(result.cleanup_stop_attempted && !result.cleanup_stop_ok){
+@@ -198,7 +202,7 @@
+             result.data_integrity=DataIntegrity::Incomplete;
+         }
+         std::string json=session::compact_json(serialize_capture_result_json(result,out));if(!json.empty()&&json.back()=='\n')json.pop_back();
+-        std::cout<<session::response(id,"\"ok\":true,\"session\":\"ready\",\"result\":"+json)<<std::flush;
++        emit(session::response(id,"\"ok\":true,\"session\":\"ready\",\"result\":"+json));
+     }
+     bool eof_cleanup_failed = false;
+     if(opened&&dev.is_open()){
+@@ -216,6 +220,20 @@
+     if(opened)dev.close();
+     if(eof_cleanup_failed) return 1;
+     return 0;
++}
++
++static int run_session_jsonl(){
++    session::AsyncDispatcher dispatcher([](const std::string& text){std::cout<<text<<std::flush;});
++    int outcome=0;
++    std::thread owner([&]{outcome=run_session_owner(&dispatcher);});
++    std::string line; bool oversized=false;
++    while(session_line(std::cin,line,oversized)){
++        if(oversized){dispatcher.output(session::error_response("","LINE_TOO_LARGE","JSONL line exceeds 65536 bytes"));continue;}
++        dispatcher.submit(line);
++        session::Value req; std::string error,command; session::Parser parser(line);
++        if(dispatcher.closing.load()) break;
++    }
++    dispatcher.finish(); owner.join(); return outcome;
+ }
+ 
+ static void print_usage() {
+--- a/core/include/atkdl16/capture.h
++++ b/core/include/atkdl16/capture.h
+@@ -73,3 +73,9 @@
+ using ProgressCallback = std::function<void(uint64_t current_samples, uint64_t total_samples, uint8_t percent)>;
+ 
++inline ErrorCode incomplete_capture_error(bool stopped, bool asynchronous) {
++    if (!stopped) return ErrorCode::CaptureTimeout;
++    // Keep legacy synchronous stop behavior; async cancellation must fail closed.
++    return asynchronous ? ErrorCode::IncompleteCapture : ErrorCode::Ok;
++}
++
+ class CaptureEngine {
+@@ -81,7 +87,8 @@
+     CaptureResult execute_capture(const CaptureConfig& config,
+                                   const std::string& capture_dir = "captures",
+                                   ProgressCallback on_progress = nullptr,
+-                                  int timeout_sec = 30);
++                                  int timeout_sec = 30,
++                                  const std::atomic<bool>* cancellation = nullptr);
+ 
+     // Cancel active capture
+     void stop();
+--- a/core/src/capture.cpp
++++ b/core/src/capture.cpp
+@@ -7,6 +7,7 @@
+ #include <iomanip>
+ #include <random>
+ #include <cstdlib>
++#include <algorithm>
+ 
+ namespace atkdl16 {
+ 
+@@ -40,15 +41,27 @@
+ CaptureResult CaptureEngine::execute_capture(const CaptureConfig& config,
+                                             const std::string& capture_dir,
+                                             ProgressCallback on_progress,
+-                                            int timeout_sec) {
++                                            int timeout_sec, const std::atomic<bool>* cancellation) {
+     CaptureResult result;
+     result.capture_id = generate_capture_id();
+     result.config = config;
+     const char* diag = std::getenv("DL16_NATIVE_DIAGNOSTICS");
+     result.diagnostics.enabled = diag && std::string(diag) == "1";
+     result.success = false;
++
+     RawRxWriter raw_log(result.raw_rx_log);
++    SampleStore store(config);
+     auto finalize = [&]() {
++        if (cancellation && !result.success) {
++            result.data_integrity=DataIntegrity::Incomplete;
++            result.requested_samples=config.total_samples();
++            for(uint8_t ch:config.enabled_channels) result.actual_samples_per_channel[ch]=store.sample_count(ch);
++            // Uncropped partial bytes are explicitly INCOMPLETE, never analysis-ready.
++            if (!store.save_to_directory(capture_dir,result.capture_id,&result)) {
++                result.error_code=ErrorCode::ArtifactWriteError;
++                result.error_message="Failed to save partial BUFFER artifacts";
++            }
++        }
+         if (!raw_log.close()) {
+             result.success=false; result.error_code=ErrorCode::ArtifactWriteError;
+             result.error_message=result.raw_rx_log.error; result.data_integrity=DataIntegrity::Incomplete;
+@@ -83,7 +96,7 @@
+                 outcome = device.transport().write_bulk(EP_BULK_OUT, frame.data(), frame.size(), 100);
+             }
+         }
+-    } cleanup{m_device, config.experimental_session_lifecycle, m_cleanup_stop_attempted, m_cleanup_stop_result};
++    } cleanup{m_device, (config.experimental_session_lifecycle || cancellation), m_cleanup_stop_attempted, m_cleanup_stop_result};
+ 
+     // 2. FLUSH_RX State
+     m_state = CaptureState::FlushRx;
+@@ -117,7 +130,6 @@
+         return finalize();
+     }
+ 
+-    SampleStore store(config);
+     RxParser parser;
+     std::vector<uint8_t> raw_buf(READ_TRANSFER_BUFFER_SIZE);
+     std::vector<uint8_t> conv_buf(READ_TRANSFER_BUFFER_SIZE);
+@@ -134,7 +146,9 @@
+     auto start_time = std::chrono::steady_clock::now();
+     auto timeout_duration = std::chrono::seconds(timeout_sec);
+ 
++    uint64_t retained_bytes=0;
+     while (!m_stop_requested && !capture_complete) {
++        if(cancellation && cancellation->load()) {stop(); break;}
+         // Check timeout
+         auto elapsed = std::chrono::steady_clock::now() - start_time;
+         if (elapsed > timeout_duration) {
+@@ -176,7 +190,12 @@
+                 switch (msg.type) {
+                     case RxMessageType::ChannelData: {
+                         auto ch_data = RxParser::parse_channel_data(msg, config.enable_rle);
+-                        if (ch_data) {
++                        if (ch_data && (!cancellation || std::find(config.enabled_channels.begin(),config.enabled_channels.end(),ch_data->channel_id)!=config.enabled_channels.end())) {
++                            if(cancellation && ch_data->data.size()>200ULL*1024*1024-retained_bytes) {
++                                stop(); result.error_code=ErrorCode::IncompleteCapture;
++                                result.error_message="BUFFER retained-byte cap reached"; return finalize();
++                            }
++                            retained_bytes+=ch_data->data.size();
+                             store.append_channel_data(ch_data->channel_id, ch_data->data.data(), ch_data->data.size());
+                         }
+                         break;
+@@ -272,14 +291,7 @@
+         result.capture_complete_received = false;
+         result.data_integrity = DataIntegrity::Incomplete;
+         result.success = false;
+-    RawRxWriter raw_log(result.raw_rx_log);
+-    auto finalize = [&]() {
+-        if (!raw_log.close()) {
+-            result.success=false; result.error_code=ErrorCode::ArtifactWriteError;
+-            result.error_message=result.raw_rx_log.error; result.data_integrity=DataIntegrity::Incomplete;
+-        }
+-        return result;
+-    };
++
+-        result.error_code = m_stop_requested ? ErrorCode::Ok : ErrorCode::CaptureTimeout;
++        result.error_code = incomplete_capture_error(m_stop_requested, cancellation != nullptr);
+         result.error_message = m_stop_requested ? "Capture was cancelled by user before completion" : "Capture timed out before Order 6 Complete received";
+         m_state = CaptureState::Error;
+@@ -289,14 +301,7 @@
+     if (!result.trigger_ack_received) {
+         result.data_integrity = DataIntegrity::Incomplete;
+         result.success = false;
+-    RawRxWriter raw_log(result.raw_rx_log);
+-    auto finalize = [&]() {
+-        if (!raw_log.close()) {
+-            result.success=false; result.error_code=ErrorCode::ArtifactWriteError;
+-            result.error_message=result.raw_rx_log.error; result.data_integrity=DataIntegrity::Incomplete;
+-        }
+-        return result;
+-    };
++
+         result.error_code = ErrorCode::ProtocolError;
+         result.error_message = "Capture completed without SimpleTrigger confirmation (Order 4 ACK)";
+         m_state = CaptureState::Error;
+@@ -346,14 +351,7 @@
+     if (!all_channels_complete) {
+         result.data_integrity = DataIntegrity::Incomplete;
+         result.success = false;
+-    RawRxWriter raw_log(result.raw_rx_log);
+-    auto finalize = [&]() {
+-        if (!raw_log.close()) {
+-            result.success=false; result.error_code=ErrorCode::ArtifactWriteError;
+-            result.error_message=result.raw_rx_log.error; result.data_integrity=DataIntegrity::Incomplete;
+-        }
+-        return result;
+-    };
++
+         result.error_code = ErrorCode::IncompleteCapture;
+         result.error_message = "Capture incomplete: one or more channels did not receive requested sample count";
+         m_state = CaptureState::Error;
+@@ -361,20 +359,13 @@
+     }
+ 
+     result.data_integrity = DataIntegrity::Complete;
+-    result.channel_edges = store.extract_all_edges();
++    if(!config.async_buffer) result.channel_edges = store.extract_all_edges();
+ 
+     bool save_ok = store.save_to_directory(capture_dir, result.capture_id, &result);
+     if (!save_ok) {
+         result.data_integrity = DataIntegrity::Incomplete;
+         result.success = false;
+-    RawRxWriter raw_log(result.raw_rx_log);
+-    auto finalize = [&]() {
+-        if (!raw_log.close()) {
+-            result.success=false; result.error_code=ErrorCode::ArtifactWriteError;
+-            result.error_message=result.raw_rx_log.error; result.data_integrity=DataIntegrity::Incomplete;
+-        }
+-        return result;
+-    };
++
+         result.error_code = ErrorCode::ArtifactWriteError;
+         result.error_message = "Failed to write capture artifacts to directory: " + capture_dir;
+         m_state = CaptureState::Error;
+--- a/core/include/atkdl16/types.h
++++ b/core/include/atkdl16/types.h
+@@ -119,6 +119,7 @@
+ struct CaptureConfig {
+     std::string raw_rx_path;
+     uint64_t raw_rx_max_bytes{32ULL * 1024 * 1024};
++    bool async_buffer{false};
+     bool experimental_session_lifecycle{false};
+     CaptureMode mode{CaptureMode::Buffer};
+     uint64_t sample_rate{20'000'000};    // Frequency in Hz (e.g. 20 MHz)
+--- a/core/src/sample_store.cpp
++++ b/core/src/sample_store.cpp
+@@ -289,7 +289,7 @@
+         }
+ 
+         // 2. Write edges.json
+-        auto all_edges = extract_all_edges();
++        auto all_edges = m_config.async_buffer ? std::map<uint8_t, ChannelEdges>{} : extract_all_edges();
+         fs::path edges_path = target_dir / "edges.json";
+         std::ofstream edges_out(edges_path);
+         if (!edges_out.is_open()) {
+@@ -340,6 +340,11 @@
+         meta_out << "  \"threshold_voltage\": " << m_config.threshold_voltage << ",\n";
+         meta_out << "  \"rle_enabled\": " << (m_config.enable_rle ? "true" : "false") << ",\n";
+         meta_out << "  \"trigger_position_percent\": " << m_config.trigger.position_percent << ",\n";
++        if (m_config.async_buffer) {
++            meta_out << "  \"async_buffer\": true,\n";
++            meta_out << "  \"partial_uncropped\": " << (result && result->data_integrity!=DataIntegrity::Complete ? "true" : "false") << ",\n";
++            meta_out << "  \"edges_omitted\": true,\n";
++        }
+         if (result) {
+             meta_out << "  \"evidence_source\": \"REAL_HARDWARE\",\n";
+             meta_out << "  \"data_integrity\": \"" << json_escape(to_string(result->data_integrity)) << "\",\n";

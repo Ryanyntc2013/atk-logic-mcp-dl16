@@ -41,6 +41,7 @@ class NativeSession:
         self._failed = False
         self._closed = False
         self._hello = False
+        self._operation_id: str | None = None
         self.capabilities: set[str] = set()
         self._observer = observer
         journal_dir = os.environ.get("DL16_SESSION_JOURNAL_DIR")
@@ -250,11 +251,18 @@ class NativeSession:
             self._start()
             if not self._hello:
                 raise SessionFailure("SESSION_PROTOCOL_ERROR", "native hello handshake missing")
+            if request.get("command") in {"capture_start", "capture_poll", "capture_cancel"} and "async_buffer_v1" not in self.capabilities:
+                raise SessionFailure("NATIVE_CAPABILITY_MISSING", "native hello does not advertise cancellable async BUFFER v1")
             if request.get("command") == "pwm" and "pwm" not in self.capabilities:
                 raise SessionFailure("NATIVE_CAPABILITY_MISSING", "native hello does not advertise PWM; rebuild patched CLI")
             if "raw_rx_path" in request and "raw_rx_log_v1" not in self.capabilities:
                 raise SessionFailure("NATIVE_CAPABILITY_MISSING", "native hello does not advertise raw RX logging v1")
-            return self._request_locked(request, timeout_s=timeout_s)
+            response = self._request_locked(request, timeout_s=timeout_s)
+            if request.get("command") == "capture_start":
+                self._operation_id = response.get("operation_id")
+            elif request.get("command") == "capture_poll" and response.get("state") == "finished":
+                self._operation_id = None
+            return response
 
     def _invalidate(self) -> None:
         self._failed = True
@@ -303,7 +311,23 @@ class NativeSession:
             evidence_error = None
             if self._proc is not None and not self._failed and self._proc.poll() is None:
                 try:
+                    if self._operation_id is not None:
+                        op = self._operation_id
+                        self._request_locked({"command": "capture_cancel", "operation_id": op}, timeout_s=1)
+                        deadline = time.monotonic() + 3
+                        while True:
+                            response = self._request_locked({"command": "capture_poll", "operation_id": op}, timeout_s=1)
+                            if response.get("state") == "finished":
+                                self._operation_id = None
+                                break
+                            if time.monotonic() >= deadline:
+                                raise SessionFailure("SESSION_TIMEOUT", "cancel cleanup did not finish; partial artifacts unverified")
+                            time.sleep(0.02)
                     self._request_locked({"command": "close"}, timeout_s=STOP_GRACE_SECONDS)
+                    if "async_buffer_v1" in self.capabilities:
+                        self._proc.wait(timeout=STOP_GRACE_SECONDS)
+                except subprocess.TimeoutExpired:
+                    evidence_error = SessionFailure("SESSION_TIMEOUT", "owner did not exit after close")
                 except SessionFailure as exc:
                     evidence_error = exc
             cleanup = self._stop_child()

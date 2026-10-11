@@ -8,6 +8,27 @@ mcp = FastMCP("atk-logic-mcp-dl16")
 
 
 @mcp.tool()
+def logic_buffer_start(channels: list[int], sample_rate_hz: int = 20_000_000,
+                       duration_ms: int = 20, threshold_voltage: float = 1.6,
+                       trigger_timeout_sec: int = 30) -> dict:
+    """Opt-in bounded asynchronous BUFFER, not Stream; returns operation ID, no waveform."""
+    return service.logic_buffer_start(channels, sample_rate_hz, duration_ms,
+                                      threshold_voltage, trigger_timeout_sec)
+
+
+@mcp.tool()
+def logic_buffer_poll(operation_id: str) -> dict:
+    """Read bounded operation status/result; incomplete bytes are not analysis-ready."""
+    return service.logic_buffer_poll(operation_id)
+
+
+@mcp.tool()
+def logic_buffer_cancel(operation_id: str) -> dict:
+    """Request cooperative same-owner BUFFER stop; poll until finished, then close owner."""
+    return service.logic_buffer_cancel(operation_id)
+
+
+@mcp.tool()
 def logic_export_atkdl(capture_id: str, channels: list[int], out_name: str) -> dict:
     """Write experimental offline-reader .atkdl subset; GUI compatibility UNVERIFIED."""
     return service.logic_export_atkdl(capture_id, channels, out_name)

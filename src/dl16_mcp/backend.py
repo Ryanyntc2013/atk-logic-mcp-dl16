@@ -337,3 +337,44 @@ def close_session() -> dict[str, Any]:
         return {"success": True, "closed": True}
     except SessionFailure as exc:
         return {"success": False, "closed": True, "error_code": exc.code, "message": str(exc)}
+
+
+def buffer_start(request: CaptureRequest, trigger_timeout_sec: int = 30) -> dict[str, Any]:
+    """Start opt-in bounded BUFFER; never advertise or silently select Stream."""
+    try:
+        request.validate()
+        if (len(request.channels) > 2 or request.sample_rate_hz > 20_000_000
+                or request.duration_ms > 30_000 or request.trigger != "immediate" or request.rle
+                or type(trigger_timeout_sec) is not int or not 1 <= trigger_timeout_sec <= 30):
+            raise ValueError("Async BUFFER requires <=2 channels, <=20MHz, <=30s, immediate, no RLE")
+        if not _session_enabled():
+            raise ValueError("Async BUFFER requires DL16_BACKEND_MODE=session")
+        cli = find_native_cli()
+        if cli is None:
+            raise ValueError("Native CLI unavailable")
+        return _get_session(cli).request({"command": "capture_start", "channels": list(request.channels),
+            "sample_rate_hz": request.sample_rate_hz, "duration_ms": request.duration_ms,
+            "threshold_voltage": request.threshold_voltage, "trigger": "immediate",
+            "trigger_timeout_sec": trigger_timeout_sec, "output_dir": str(captures_dir())}, timeout_s=5)
+    except (ValueError, SessionFailure) as exc:
+        return {"success": False, "error_code": getattr(exc, "code", "INVALID_CAPTURE"), "message": str(exc)}
+
+
+def buffer_control(operation_id: str, *, cancel: bool = False) -> dict[str, Any]:
+    # Never create/restart a worker to poll an operation belonging to a lost owner.
+    with _SESSION_LOCK:
+        session = _SESSION
+    if session is None or session.failed or not _session_enabled():
+        return {"success": False, "error_code": "NO_ACTIVE_SESSION", "message": "Original owner unavailable"}
+    try:
+        response = session.request({"command": "capture_cancel" if cancel else "capture_poll",
+                                    "operation_id": operation_id}, timeout_s=5)
+        nested = response.get("response", {}).get("result")
+        if isinstance(nested, dict) and nested.get("success") is True and (
+                nested.get("data_integrity") != "COMPLETE" or not nested.get("trigger_ack_received")
+                or not nested.get("capture_complete_received")):
+            nested["success"] = False
+            nested["error_code"] = "INCOMPLETE_CAPTURE"
+        return response
+    except SessionFailure as exc:
+        return {"success": False, "error_code": exc.code, "message": str(exc)}

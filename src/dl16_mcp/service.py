@@ -216,3 +216,18 @@ def logic_export_atkdl(capture_id: str, channels: list[int], out_name: str) -> d
         return write_atkdl([load_capture(capture_id, ch) for ch in channels], exports_dir() / out_name)
     except (OSError, ValueError, KeyError) as exc:
         return {"success": False, "error_code": "ATKDL_EXPORT_INVALID", "message": str(exc)}
+
+
+def logic_buffer_start(channels: list[int], sample_rate_hz: int = 20_000_000,
+                       duration_ms: int = 20, threshold_voltage: float = 1.6,
+                       trigger_timeout_sec: int = 30) -> dict[str, Any]:
+    return backend.buffer_start(CaptureRequest(tuple(channels), sample_rate_hz, duration_ms,
+                                               threshold_voltage), trigger_timeout_sec)
+
+
+def logic_buffer_poll(operation_id: str) -> dict[str, Any]:
+    return backend.buffer_control(operation_id)
+
+
+def logic_buffer_cancel(operation_id: str) -> dict[str, Any]:
+    return backend.buffer_control(operation_id, cancel=True)

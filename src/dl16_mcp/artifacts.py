@@ -52,6 +52,8 @@ def load_capture(capture_id: str, channel: int) -> Waveform:
         raise ValueError("Capture outside artifact root")
     with (folder / "meta.json").open("r", encoding="utf-8") as file:
         meta = json.load(file)
+    if meta.get("partial_uncropped") is True:
+        raise ValueError("Partial uncropped BUFFER artifacts are not analysis-ready")
     raw = (folder / f"ch{channel:02d}.bits").read_bytes()
     sr = _sample_rate(meta)
     channel_counts = meta.get("sample_counts", {})

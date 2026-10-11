@@ -89,6 +89,13 @@ if ($LASTEXITCODE -ne 0) { throw 'Raw RX patch check failed' }
 git -C $Dst apply $RawRxPatch
 if ($LASTEXITCODE -ne 0) { throw 'Raw RX patch apply failed' }
 
+$AsyncPatch = Join-Path $RepoRoot 'scripts\patches\atk-dl16-async-buffer.patch'
+git -C $Dst apply --check $AsyncPatch
+if ($LASTEXITCODE -ne 0) { throw 'Async BUFFER patch check failed' }
+git -C $Dst apply $AsyncPatch
+if ($LASTEXITCODE -ne 0) { throw 'Async BUFFER patch apply failed' }
+Copy-Item -LiteralPath (Join-Path $RepoRoot 'scripts\async_dispatcher.h') -Destination (Join-Path $Dst 'cli\async_dispatcher.h') -Force
+
 if (-not $SkipBuild) {
   # Prefer the requested toolset only when it is actually installed on this machine;
   # otherwise fall back to the installed default (let CMake pick v143).

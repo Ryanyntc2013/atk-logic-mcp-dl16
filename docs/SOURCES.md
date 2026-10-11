@@ -97,3 +97,7 @@ reported. Synthetic actual-executable tests are OFFLINE_SYNTHETIC. Replay of
 archived artifact, not new HIL. Parsed Complete is not completeness proof, and no
 channel comparison equivalence is claimed without crop alignment. See
 [TASK-048](tasks/DL16-TASK-048-offline-raw-rx-replay.md).
+
+## TASK-049 asynchronous BUFFER provenance
+
+Owner dispatcher and host API independently authored against pinned CPP public interfaces and existing tracked patches. Native CaptureEngine/SampleStore adaptations persist as the final tracked bootstrap patch; no LHX implementation copied or translated. CPP Stream mode flags are not evidence of validated incremental Stream or mode-tail handling. Only async_buffer_v1 is advertised, with OFFLINE_SYNTHETIC dispatcher/native artifact evidence. Parent-provided physical cancellation requests exposed legacy OK cancellation classification; the independent shared classification fix and actual native serialization regression are SYNTHETIC_OFFLINE, not post-fix HIL. Original physical records remain unchanged; corrected-code physical cancel and Stream remain separate gates. See tasks/DL16-TASK-049-async-buffer-foundation.md.
