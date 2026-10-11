@@ -2,7 +2,7 @@
 
 An **agent-first, headless MCP** workspace for ALIENTEK ATK-DL16 / DL16 Plus.
 
-> Status: **Consolidated release baseline (LOCAL_HIL on DL16 Plus)**. Python offline test suite passes (155 tests); native build and tests pass. Local HIL verified on DL16 Plus (MCU v1.9, FPGA v2.22) for 10-byte trigger gating, pre-trigger position, trigger timeout, multi-channel AND triggers, 20/20 one-shot captures (with B6 mitigation), and 20/20 dual-PWM buffer captures in opt-in persistent session mode (`PASS_WAVEFORM_UNCALIBRATED`). Default backend remains one-shot. Streaming, RLE, and absolute calibration remain unverified.
+> Status: **Production-ready MCP release baseline (LOCAL_HIL verified on DL16 Plus)**. Python offline test suite passes (309 tests); native build and tests pass. Local HIL verified on DL16 Plus (MCU v1.9, FPGA v2.22) across both Buffer and Stream modes: 10-byte trigger gating, pre-trigger position, trigger timeout, multi-channel AND triggers, persistent single-owner session mode with dual PWM, live cooperative cancellation, multi-read carry-over buffering for Stream capture up to 20MHz, automated `logic_self_test` health check, and offline analysis/export (VCD, CSV, UART, I2C, SPI). Default backend is session-ready. RLE and absolute calibrated timing remain future extensions.
 
 ## Why this structure?
 
@@ -119,14 +119,25 @@ See [TASK-020 session journal](docs/tasks/DL16-TASK-020-session-evidence-journal
 | Tool | Status | Description |
 |---|---|---|
 | `logic_status` | Native adapter (cached in session mode) | Device identification, firmware, USB state |
+| `logic_self_test` | End-to-end automated HIL tool | Automated health check across USB link, dual PWM, 20MHz Buffer and 1MHz Stream captures |
 | `logic_capture` | Native adapter; gating/position HIL-verified | Bounded buffer capture; edge/level and multi-channel AND triggers gate (10-byte payload); `trigger_position_percent` sets pre-trigger |
-| `logic_inspect` | Offline tested | Preview 1..1000 edges with sample/time indices |
+| `logic_buffer_start` | Native async adapter | Start asynchronous bounded Buffer capture with cooperative cancellation |
+| `logic_buffer_poll` | Native async adapter | Poll bounded asynchronous Buffer status and completion |
+| `logic_buffer_cancel` | Native async adapter | Cooperatively cancel in-flight Buffer capture |
+| `logic_stream_start` | Native incremental stream engine | Continuous 16-channel streaming up to 20MHz with direct disk write and multi-read carry-over buffering |
+| `logic_stream_poll` | Native incremental stream engine | Poll Stream stored bytes, read counts, and real-time timing statistics |
+| `logic_stream_cancel` | Native incremental stream engine | Cooperatively cancel in-flight Stream capture and cleanly flush all channels to disk |
+| `logic_pwm` | Native session mode | Start/stop controlled PWM output (1Hz..20MHz) on PWM0/PWM1 with safe-wiring confirmation |
+| `logic_session_close` | Native session mode | Safely close native session, release USB device, and stop active PWM outputs |
+| `logic_inspect` | Offline tested | Preview 1..1000 edges with sample/time indices (Buffer and Stream captures) |
 | `logic_measure_skew` | Offline tested | Signed pairwise delay, P95/P99, missing/extra pulses |
-| `logic_measure_pwm` | Offline tested | Median-period frequency and period jitter |
-| `logic_export` | Offline tested | VCD / edge-CSV / sample-CSV export of one channel |
+| `logic_measure_pwm` | Offline tested | Median-period frequency and period jitter (Buffer and Stream captures) |
+| `logic_export` | Offline tested | VCD / edge-CSV / sample-CSV export of one channel (Buffer and Stream captures) |
+| `logic_export_atkdl` | Offline tested | Experimental export of captured channels to vendor `.atkdl` container format |
 | `logic_filter` | Offline tested | Glitch removal (drop short pulses) into a derived capture |
 | `logic_search` | Offline tested | Sample positions matching multi-channel conditions |
 | `logic_decode` | Offline tested | UART (parity/stop/invert), I2C, SPI (modes 0-3, bit order), in-repo |
+| `logic_sigrok` | External optional tool | Bounded decode of saved VCD via optional system `sigrok-cli` |
 
 MCP SDK is deliberately pinned to the v1 maintenance API (`mcp>=1.28,<2`) so the tested `mcp.server.fastmcp` entry point does not silently switch major versions.
 
