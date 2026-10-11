@@ -9,17 +9,19 @@ PR: https://github.com/Ryanyntc2013/atk-logic-mcp-dl16/pull/1
 
 1. `logic_filter` exclusively creates a new capture directory. It **never** overwrites an existing capture, even when the compatibility parameter `overwrite=True` is passed. Original file content and original `meta.json` remain unchanged; derived metadata is written last.
 2. Filtered captures separate software `processing_status` from source acquisition `capture_complete_received`, `trigger_ack_received`, `data_integrity`; record `source_sha256`, `source_integrity`, original source and transform. The derived artifact must never be promoted from `UNVERIFIED` to `COMPLETE`.
-3. UART decoder skips candidate falling edges inside an already consumed frame; back-to-back serial bytes must not spawn false, valid frames.
-4. Reject duplicate-channel trigger conditions and explicit host timeouts that cannot encompass trigger wait, acquisition duration and a minimum cleanup margin.
-5. Stream offline loader supports explicit per-channel `valid_samples` in `stream_meta.json` and marks byte-count-inferred sample depth as unverified; do not claim calibrated timing.
-6. Self-test checks that no existing MCP-owned session is present before touching the device. Every exit path runs bounded cleanup (cancel active Stream, stop both PWM outputs, close owned session). `cleanup_ok=False` blocks positive verdicts. A successful loopback diagnostic is `DIAGNOSTIC_PASS_UNCALIBRATED`, not a calibration certificate.
-7. Glitch filtering no longer expands full captures into a sample-per-byte array. It uses bounded/chunked edge extraction and packed-byte range edits, preserving sample counts.
+3. For ordinary Buffer source captures, preserve untouched peer channels and their common sample clock; fail if peer data are missing or misaligned.
+4. UART decoder skips candidate falling edges inside an already consumed frame; back-to-back serial bytes must not spawn false, valid frames.
+5. Reject duplicate-channel trigger conditions and explicit host timeouts that cannot encompass trigger wait, acquisition duration and a minimum cleanup margin.
+6. Stream offline loader supports explicit per-channel `valid_samples` in `stream_meta.json` and marks byte-count-inferred sample depth as unverified; do not claim calibrated timing.
+7. Self-test checks that no existing MCP-owned session is present before touching the device. Every exit path runs bounded cleanup (cancel active Stream, stop both PWM outputs, close owned session). `cleanup_ok=False` blocks positive verdicts. A successful loopback diagnostic is `DIAGNOSTIC_PASS_UNCALIBRATED`, not a calibration certificate.
+8. Glitch filtering no longer expands full captures into a sample-per-byte array. It uses bounded/chunked edge extraction and packed-byte range edits, preserving sample counts.
 
 ## Offline tests
 
 `tests/test_task066_offline_safety.py` covers:
 
 - original and other existing capture immutability, including overwrite requests
+- preserve unmodified peer channels; refuse short or misaligned peer data
 - SHA-256/source-integrity preservation and no synthetic acquisition claims
 - consecutive UART framing (0x6B DE F6 49)
 - duplicate AND channel and host/device timeout mismatch
@@ -50,3 +52,4 @@ Never run automatic HIL for this task from CI. Raw/RLE/absolute timing calibrati
 ## Deployment policy
 
 PR stays draft until offline CI passes, review is complete, and local hardware gate is either performed or explicitly deferred. Main remains unchanged during this offline work.
+Self-test cleanup semantics: `cleanup_ok` means **software commands/owned worker closure confirmed**, while `physical_pwm_off_verified=False` explicitly requires later instrument observation. A final close response must confirm `closed=True` if output could have been active.
