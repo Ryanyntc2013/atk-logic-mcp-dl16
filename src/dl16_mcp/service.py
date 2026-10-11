@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import hashlib
 from typing import Any
 
 from . import backend
@@ -136,29 +137,55 @@ def _parse_condition(condition) -> tuple[int, str]:
 def logic_filter(capture_id: str, channel: int, min_pulse_samples: int,
                  atkdl_file: str | None = None, out_name: str | None = None,
                  overwrite: bool = False) -> dict[str, Any]:
-    """Write a derived capture with pulses shorter than min_pulse_samples removed."""
+    """Create a new, provenance-preserving capture; NEVER modify an existing capture.
+
+    `overwrite` is retained for API compatibility but intentionally cannot bypass
+    protection on capture directories (including previously derived captures).
+    """
     try:
         wave = _load(capture_id, channel, atkdl_file=atkdl_file)
-        filtered, removed = glitch_filter(wave.raw, wave.samples, min_pulse_samples=min_pulse_samples)
         new_id = out_name or f"{capture_id}-filt{min_pulse_samples}-ch{channel:02d}"
-        if not CAPTURE_ID_RE.fullmatch(new_id):
+        if not CAPTURE_ID_RE.fullmatch(new_id) or new_id in (".", ".."):
             raise ValueError("Unsafe derived capture id")
+        if not atkdl_file and new_id == capture_id:
+            raise ValueError("In-place filtering is forbidden; source capture is immutable")
         folder = captures_dir() / new_id
-        if folder.exists() and not overwrite:
-            raise ValueError("Derived capture exists; pass overwrite=true to replace it")
-        folder.mkdir(parents=True, exist_ok=True)
-        (folder / f"ch{channel:02d}.bits").write_bytes(filtered)
+        # Exclusive creation prevents destroying originals or mixing old/new channels.
+        # No existing directory is writable through this analysis operation.
+        if folder.exists() or folder.is_symlink():
+            raise ValueError("Capture ID exists; use a new derived capture ID (overwrite forbidden)")
+        filtered, removed = glitch_filter(wave.raw, wave.samples,
+                                          min_pulse_samples=min_pulse_samples)
+        original = wave.metadata
         meta = {
-            "capture_id": new_id, "derived_from": capture_id, "transform": "glitch_filter",
+            "capture_id": new_id,
+            "derived_from": str(wave.metadata.get("archive_path", atkdl_file)) if atkdl_file else capture_id,
+            "transform": "glitch_filter", "processing_status": "COMPLETE",
             "min_pulse_samples": min_pulse_samples, "channel": channel,
             "sample_rate": wave.sample_rate_hz, "requested_samples": wave.samples,
-            "sample_counts": {str(channel): wave.samples}, "data_integrity": "COMPLETE",
-            "capture_complete_received": True, "trigger_ack_received": True,
-            "evidence_source": "DERIVED",
+            "sample_counts": {str(channel): wave.samples},
+            "data_integrity": wave.integrity if wave.integrity == "COMPLETE" else "UNVERIFIED",
+            # These describe the source acquisition, not the success of filtering.
+            "capture_complete_received": bool(original.get("capture_complete_received", False)),
+            "trigger_ack_received": bool(original.get("trigger_ack_received", False)),
+            "evidence_source": "DERIVED", "source_evidence_source": wave.source,
+            "source_integrity": wave.integrity,
+            "source_sha256": hashlib.sha256(wave.raw).hexdigest(),
         }
-        (folder / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+        folder.mkdir(parents=False, exist_ok=False)
+        try:
+            (folder / f"ch{channel:02d}.bits").write_bytes(filtered)
+            # Publish metadata LAST; an interrupted write cannot be mistaken for complete.
+            (folder / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+        except BaseException:
+            # Only delete the newly-created folder; never remove an existing capture.
+            from shutil import rmtree
+            rmtree(folder, ignore_errors=True)
+            raise
         return {"success": True, "derived_capture_id": new_id, "channel": channel,
-                "removed_pulses": removed, "path": str(folder), "source_evidence": wave.source}
+                "removed_pulses": removed, "path": str(folder),
+                "source_evidence": wave.source, "source_integrity": wave.integrity,
+                "source_sha256": meta["source_sha256"], "integrity": meta["data_integrity"]}
     except (ValueError, FileNotFoundError, OSError, KeyError) as exc:
         return {"success": False, "error_code": "FILTER_FAILED", "message": str(exc)}
 
