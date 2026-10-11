@@ -57,7 +57,10 @@ def decode_uart(wave: Waveform, *, baud_rate: int = 115200, data_bits: int = 8,
     frame_bits = 1 + data_bits + parity_bits + stop_bits
     falling = np.flatnonzero(line[:-1] & ~line[1:]) + 1
     frames: list[dict[str, Any]] = []
+    next_frame_start = 0
     for start in falling:
+        if start < next_frame_start:
+            continue  # An edge inside the preceding frame is a data bit, not a new start.
         centers = np.round(start + (np.arange(frame_bits) + 0.5) * samples_per_bit).astype(int)
         if centers[-1] >= n:
             break
@@ -76,6 +79,8 @@ def decode_uart(wave: Waveform, *, baud_rate: int = 115200, data_bits: int = 8,
         stop_ok = bool(np.all(values[1 + data_bits + parity_bits:]))
         frames.append({"start_sample": int(start), "value": value,
                        "parity_ok": parity_ok, "stop_ok": stop_ok})
+        # The next byte can begin immediately after the stop bit(s).
+        next_frame_start = int(np.ceil(start + frame_bits * samples_per_bit - 1e-9))
         if len(frames) >= limit:
             break
     return frames
