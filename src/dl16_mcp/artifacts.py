@@ -50,6 +50,21 @@ def load_capture(capture_id: str, channel: int) -> Waveform:
     folder = (root / capture_id).resolve()
     if root not in folder.parents:
         raise ValueError("Capture outside artifact root")
+    stream_meta_path = folder / "stream_meta.json"
+    if stream_meta_path.exists():
+        with stream_meta_path.open("r", encoding="utf-8") as file:
+            meta = json.load(file)
+        ch_file = folder / f"ch{channel}.packed.bin"
+        if not ch_file.exists():
+            raise FileNotFoundError(f"Stream channel file not found: {ch_file.name}")
+        raw = ch_file.read_bytes()
+        sr = _sample_rate(meta)
+        samples = len(raw) * 8
+        if samples < 1:
+            raise ValueError("Stream channel contains no samples")
+        integrity = str(meta.get("data_integrity", "INCOMPLETE")).upper()
+        source = str(meta.get("evidence_source", "UNKNOWN"))
+        return Waveform(channel, raw, samples, sr, integrity, source, meta)
     with (folder / "meta.json").open("r", encoding="utf-8") as file:
         meta = json.load(file)
     if meta.get("partial_uncropped") is True:

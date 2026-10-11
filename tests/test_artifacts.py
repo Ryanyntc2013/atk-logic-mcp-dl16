@@ -44,3 +44,27 @@ def test_split_vendor_archive(tmp_path):
     w = load_atkdl(file, 3)
     assert len(w.raw) == 250
     assert w.samples == 2000
+
+
+def test_load_stream_capture(monkeypatch, tmp_path):
+    monkeypatch.setenv("DL16_DATA_DIR", str(tmp_path))
+    d = tmp_path / "captures" / "stream-test"
+    d.mkdir(parents=True)
+    (d / "ch8.packed.bin").write_bytes(b"\xaa" * 100)
+    (d / "stream_meta.json").write_text(json.dumps({
+        "schema": "dl16-incremental-packed/v1",
+        "sample_rate_hz": 1_000_000,
+        "data_integrity": "INCOMPLETE",
+        "evidence_source": "SYNTHETIC_OFFLINE",
+        "channels": [{"channel": 8, "stored_bytes": 100}],
+    }), encoding="utf-8")
+    w = load_capture("stream-test", 8)
+    assert w.channel == 8
+    assert w.samples == 800
+    assert w.sample_rate_hz == 1_000_000
+    assert w.integrity == "INCOMPLETE"
+    assert w.source == "SYNTHETIC_OFFLINE"
+
+    with pytest.raises(FileNotFoundError):
+        load_capture("stream-test", 9)
+

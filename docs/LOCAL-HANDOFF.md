@@ -1,3 +1,16 @@
+# Latest continuation — TASK-063, 2026-10-11
+
+DONE. Integrated Stream capture directories (`stream_meta.json` + `ch{channel}.packed.bin`)
+into the unified `dl16_mcp.artifacts.load_capture` loader.
+Stream channels now seamlessly feed into `logic_inspect`, `logic_measure_pwm`, `logic_export`
+(VCD/CSV), `logic_decode` (UART/I2C/SPI), `logic_filter`, and `logic_search` while
+faithfully preserving `data_integrity: "INCOMPLETE"`.
+Verified against TASK-060 physical hardware capture: CH8 measured 991 cycles at 1000.0Hz
+with 0.0ns RMS jitter; CH14 measured 1982 cycles at 2000.0Hz with 0.0ns RMS jitter.
+Successfully exported to VCD and verified 992 edges with 1000-sample period.
+Validation: **308 full passed**, compileall clean.
+Details: [tasks/DL16-TASK-063-stream-export-and-decode.md](tasks/DL16-TASK-063-stream-export-and-decode.md).
+
 # Latest continuation — TASK-062, 2026-10-11
 
 HIL DONE. Probed full Stream sample rate ladder across 2MHz (500ms), 5MHz (200ms),
