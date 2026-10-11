@@ -32,6 +32,10 @@ REAL_HARDWARE sources stay distinct.
   `["ch7=rising","ch15=high"]` (AND, same sample).
 - `logic_decode(capture_id, protocol, channels, baud_rate, cpol, cpha, data_bits, parity, stop_bits, invert, bit_order, bits_per_word)`.
 
+## Optional sigrok host
+
+`logic_sigrok(vcd_file, decoder, channels, options=None, timeout_s=30)` decodes a saved VCD through explicitly installed `sigrok-cli`. It does not capture USB traffic. Input is capped at 64 MiB; returned output preview at 64 KiB, stderr at 4 KiB. Missing binary returns `SIGROK_MISSING`. Decoder/channel/option identifiers are validated and no shell is invoked. External decoder catalogue is not certified; this environment has no installed sigrok-cli, so only offline mocked contract tests have run.
+
 ## Native helper tools (not MCP; offline build via scripts)
 
 - `atk-dl16.exe` — pinned capture CLI (used by `logic_capture`/`logic_status`).

@@ -8,6 +8,13 @@ mcp = FastMCP("atk-logic-mcp-dl16")
 
 
 @mcp.tool()
+def logic_sigrok(vcd_file: str, decoder: str, channels: dict[str, int],
+                 options: dict[str, str] | None = None, timeout_s: float = 30) -> dict:
+    """Decode a saved VCD through optional sigrok-cli with bounded output; no USB access."""
+    return service.logic_sigrok(vcd_file, decoder, channels, options, timeout_s)
+
+
+@mcp.tool()
 def logic_pwm(output: int, action: str = "configure", frequency_hz: int = 1000,
               duty_percent: float = 50.0, confirm_safe_wiring: bool = False) -> dict:
     """Drive a confirmed safe PWM output in the owned session; no raw commands.

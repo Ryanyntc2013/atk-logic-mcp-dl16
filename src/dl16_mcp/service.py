@@ -195,3 +195,13 @@ def logic_pwm(output: int, action: str = "configure", frequency_hz: int = 1000,
 
 def logic_session_close() -> dict[str, Any]:
     return backend.close_session()
+
+
+def logic_sigrok(vcd_file: str, decoder: str, channels: dict[str, int],
+                 options: dict[str, str] | None = None, timeout_s: float = 30) -> dict[str, Any]:
+    from pathlib import Path
+    from .sigrok import decode_vcd
+    try:
+        return decode_vcd(Path(vcd_file), decoder, channels, options, timeout_s)
+    except (OSError, ValueError, TypeError) as exc:
+        return {"success": False, "error_code": "SIGROK_INPUT_INVALID", "message": str(exc)[:1024]}

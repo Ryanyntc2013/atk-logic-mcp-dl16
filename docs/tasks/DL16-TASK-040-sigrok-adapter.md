@@ -1,0 +1,5 @@
+# DL16-TASK-040 — optional offline sigrok adapter
+
+Independent optional host for installed sigrok-cli; no LHX code copied. Public logic_sigrok consumes saved VCD,decoder name,channel map/options and bounded timeout. No shell/USB. Validates decoder/option separators,channel range,input <=64MiB. Tool-message stdout preview <=64KiB,stderr <=4KiB;subprocess timeout <=120s,temporary files cleaned. Output disk usage depends on sigrok output within timeout;not a strict disk quota. No automatic package installation. Missing dependency explicit SIGROK_MISSING;internal UART/I2C/SPI unaffected.
+
+Four offline mocked process tests pass,ruff new module/tests pass. Installed sigrok-cli not found locally,so actual external decoder acceptance NOT_RUN. Do not claim CAN/LIN/JTAG/all sigrok catalogue validated. Scope DONE optional host/API scaffold with offline contract coverage;external runtime validation blocked missing dependency. Hardware HIL_NOT_RUN (offline feature). Explicit operator install can enable real golden-VCD decoder tests later. No raw live protocol input shared externally.
