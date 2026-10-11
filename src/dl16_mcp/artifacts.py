@@ -59,12 +59,28 @@ def load_capture(capture_id: str, channel: int) -> Waveform:
             raise FileNotFoundError(f"Stream channel file not found: {ch_file.name}")
         raw = ch_file.read_bytes()
         sr = _sample_rate(meta)
-        samples = len(raw) * 8
+        # Byte length gives a conservative upper bound, not proof that every
+        # padding bit is a physically acquired sample.
+        channel_entries = meta.get("channels", [])
+        entry = next((e for e in channel_entries
+                      if isinstance(e, dict) and e.get("channel") == channel), None) if isinstance(channel_entries, list) else None
+        valid_samples = entry.get("valid_samples") if entry else None
+        if valid_samples is None:
+            samples = len(raw) * 8
+            sample_authority = "BYTE_LENGTH_UNVERIFIED"
+        else:
+            if type(valid_samples) is not int or valid_samples < 1 or valid_samples > len(raw) * 8:
+                raise ValueError("Invalid explicit Stream valid_samples")
+            samples = valid_samples
+            sample_authority = "EXPLICIT_VALID_SAMPLES"
         if samples < 1:
             raise ValueError("Stream channel contains no samples")
         integrity = str(meta.get("data_integrity", "INCOMPLETE")).upper()
+        if integrity == "COMPLETE" and sample_authority != "EXPLICIT_VALID_SAMPLES":
+            integrity = "UNVERIFIED"
         source = str(meta.get("evidence_source", "UNKNOWN"))
-        return Waveform(channel, raw, samples, sr, integrity, source, meta)
+        return Waveform(channel, raw, samples, sr, integrity, source,
+                        {**meta, "sample_count_authority": sample_authority})
     with (folder / "meta.json").open("r", encoding="utf-8") as file:
         meta = json.load(file)
     if meta.get("partial_uncropped") is True:
