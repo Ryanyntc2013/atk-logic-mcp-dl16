@@ -55,6 +55,10 @@ _SESSION: NativeSession | None = None
 _SESSION_PATH: Path | None = None
 # Sessions removed from _SESSION while close() or an async op may still hold USB.
 _RETIRING: list[NativeSession] = []
+# Set for the whole self-test so the busy check and the first PWM are one claim.
+_SELF_TEST_CLAIMED = False
+_self_test_claim = threading.local()
+_DEFAULT_TRIGGER_TIMEOUT_SEC = 30
 _HOST_TIMEOUT_DEFAULT_S = 45.0
 _HOST_TIMEOUT_EXPLICIT_MAX_S = 3600.0
 # A documented 3600 s trigger wait plus capture duration does not fit in 3600 s.
@@ -86,16 +90,44 @@ def has_owned_session() -> bool:
     return session is not None and not bool(getattr(session, "is_closed", False))
 
 
+def _tracked_sessions() -> list[Any]:
+    return [session for session in (_SESSION, *_RETIRING) if session is not None]
+
+
 def device_busy() -> bool:
-    """True when a live session, a retiring owner, or an in-flight buffer/stream holds the device.
+    """True when a live session, a retiring owner, an in-flight buffer/stream, or a self-test claim holds the device.
 
     An async operation can outlive the ``_SESSION`` pointer: close removes that
-    pointer before cancel finishes, and a failed cancel can leave the operation
-    id set after ``is_closed`` becomes true.
+    pointer before cancel finishes. The operation id is cleared once that child
+    is confirmed exited.
     """
     with _SESSION_LOCK:
-        sessions = [session for session in (_SESSION, *_RETIRING) if session is not None]
-    return any(_owner_still_busy(session) for session in sessions)
+        claimed = _SELF_TEST_CLAIMED
+        sessions = _tracked_sessions()
+    return claimed or any(_owner_still_busy(session) for session in sessions)
+
+
+def claim_for_self_test() -> bool:
+    """Atomically reserve the device for self-test when nothing else owns it.
+
+    The claiming thread may then open the session. Other threads see the claim
+    as busy and cannot start a second owner.
+    """
+    global _SELF_TEST_CLAIMED
+    with _SESSION_LOCK:
+        if _SELF_TEST_CLAIMED or any(_owner_still_busy(session) for session in _tracked_sessions()):
+            return False
+        _SELF_TEST_CLAIMED = True
+    _self_test_claim.held = True
+    return True
+
+
+def release_self_test_claim() -> None:
+    """Drop the self-test reservation. Safe to call when this thread holds none."""
+    global _SELF_TEST_CLAIMED
+    with _SESSION_LOCK:
+        _SELF_TEST_CLAIMED = False
+    _self_test_claim.held = False
 
 
 def _track_retiring(session: NativeSession) -> None:
@@ -127,6 +159,8 @@ def _finish_retire(session: NativeSession) -> dict[str, Any]:
 def _get_session(cli: Path) -> NativeSession:
     global _SESSION, _SESSION_PATH
     with _SESSION_LOCK:
+        if _SELF_TEST_CLAIMED and not getattr(_self_test_claim, "held", False):
+            raise SessionFailure("DEVICE_BUSY", "self-test holds the device")
         if (_SESSION is not None and _SESSION_PATH == cli
                 and not _SESSION.failed):
             return _SESSION
@@ -219,13 +253,15 @@ def _resolve_host_timeout(request: CaptureRequest, timeout_s: float | None,
                 or not 1.0 <= float(timeout_s) <= _HOST_TIMEOUT_EXPLICIT_MAX_S):
             raise ValueError("timeout_s must be from 1 to 3600 seconds")
         resolved = float(timeout_s)
-        if (request.trigger != "immediate" and trigger_timeout_sec is not None
-                and resolved <= trigger_timeout_sec + request.duration_ms / 1000 + _CLEANUP_MARGIN_S):
-            raise ValueError("Host timeout must exceed trigger wait + capture duration + 5s cleanup margin")
+        if request.trigger != "immediate":
+            # Omitted trigger_timeout_sec is still sent as the 30 s device default.
+            wait = _DEFAULT_TRIGGER_TIMEOUT_SEC if trigger_timeout_sec is None else trigger_timeout_sec
+            if resolved <= wait + request.duration_ms / 1000 + _CLEANUP_MARGIN_S:
+                raise ValueError("Host timeout must exceed trigger wait + capture duration + 5s cleanup margin")
         return resolved
     resolved = _HOST_TIMEOUT_DEFAULT_S
     if request.trigger != "immediate":
-        wait = 30 if trigger_timeout_sec is None else trigger_timeout_sec
+        wait = _DEFAULT_TRIGGER_TIMEOUT_SEC if trigger_timeout_sec is None else trigger_timeout_sec
         needed = float(wait) + request.duration_ms / 1000 + _CLEANUP_MARGIN_S + 1.0
         resolved = max(resolved, needed)
     if resolved > _HOST_TIMEOUT_DERIVED_MAX_S:
@@ -290,7 +326,7 @@ def capture(request: CaptureRequest, timeout_s: float | None = None,
                 "threshold_voltage": request.threshold_voltage,
                 "trigger": request.trigger,
                 "trigger_position_percent": (trigger_position_percent if trigger_position_percent is not None else 10.0),
-                "trigger_timeout_sec": (trigger_timeout_sec if trigger_timeout_sec is not None else 30),
+                "trigger_timeout_sec": (trigger_timeout_sec if trigger_timeout_sec is not None else _DEFAULT_TRIGGER_TIMEOUT_SEC),
                 "output_dir": str(captures_dir()),
             }, timeout_s=timeout_s)
             doc = response.get("result")

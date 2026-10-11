@@ -44,7 +44,7 @@ def test_uart_even_parity_and_mismatch():
 
 def test_uart_noise_glitch_does_not_swallow_following_byte():
     # A one-bit false start whose stop sample lands inside a later real frame
-    # must not consume that frame. Only a valid stop/parity advances the cursor.
+    # must not be stored or consume the result limit. Search resumes one bit later.
     spb = 10
     bits = [1] * 30
     bits += [0] * spb                 # false start at sample 30
@@ -54,9 +54,22 @@ def test_uart_noise_glitch_does_not_swallow_following_byte():
     bits += [1] * spb                 # stop
     bits += [1] * spb
     frames = decode_uart(wf(0, bits), baud_rate=100_000)
-    valid = [frame["value"] for frame in frames if frame["parity_ok"] and frame["stop_ok"]]
-    assert valid == [0x00]
-    assert any(frame["stop_ok"] is False for frame in frames)
+    assert [frame["value"] for frame in frames] == [0x00]
+    assert all(frame["parity_ok"] and frame["stop_ok"] for frame in frames)
+
+
+def test_uart_parity_error_does_not_invent_extra_bytes():
+    # 0x55 falls on every other bit. A real stop with bad parity must stay one
+    # frame; those data edges must not become extra valid bytes.
+    first = uart_bits(0x55, 10, parity="even")
+    second = uart_bits(0xA5, 10, parity="odd")
+    frames = decode_uart(wf(0, first + second), baud_rate=100_000, parity="odd")
+    assert [(frame["value"], frame["parity_ok"], frame["stop_ok"]) for frame in frames] == [
+        (0x55, False, True),
+        (0xA5, True, True),
+    ]
+    limited = decode_uart(wf(0, first + second), baud_rate=100_000, parity="odd", limit=1)
+    assert [(frame["value"], frame["parity_ok"]) for frame in limited] == [(0x55, False)]
 
 
 def test_uart_inverted_and_two_stop_bits():

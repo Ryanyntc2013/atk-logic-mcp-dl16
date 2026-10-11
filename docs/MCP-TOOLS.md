@@ -49,6 +49,8 @@ REAL_HARDWARE sources stay distinct.
 
 PWM output is now exposed as `logic_pwm(output, action="configure"|"stop", frequency_hz=1000, duty_percent=50, confirm_safe_wiring=false)`. It requires explicit safe-wiring confirmation, `DL16_BACKEND_MODE=session`, and native hello advertising `pwm`. Range: outputs 0/1, integer 1..20 MHz, finite duty 0..100%. A successful transfer does not prove physical output. Configure multiple outputs and capture within the same persistent owner; `logic_session_close()` stops owned outputs and surfaces cleanup failures.
 
+`logic_self_test(safety_confirmation)` is a breaking rename of the old boolean `confirm_safe_wiring` parameter. The required value is the exact string `CONFIRMED_SAFE_WIRING_GUI_CLOSED`. `logic_pwm` still uses `confirm_safe_wiring`.
+
 CLI: `dl16ctl pwm configure --output 0 --frequency-hz 1000 --duty-percent 50 --confirm-safe-wiring`, `dl16ctl pwm stop --output 0 --confirm-safe-wiring`, `dl16ctl session-close`. Standalone CLI exit closes its owner and stops owned outputs; use persistent MCP/native JSONL for setup followed by capture. No `send_raw`, firmware, bootloader or driver tool exists.
 
 ## Output discipline

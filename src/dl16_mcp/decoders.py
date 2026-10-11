@@ -37,6 +37,9 @@ def decode_uart(wave: Waveform, *, baud_rate: int = 115200, data_bits: int = 8,
     """Asynchronous UART frames from one channel.
 
     Idle is high (low when ``invert``). Each frame is sampled at bit centers.
+    A valid stop bit consumes the frame even when parity fails. A failed stop
+    is not returned and does not use the result limit; the search resumes one
+    bit later, and only after a full bit of idle-high.
     """
     if baud_rate <= 0:
         raise AnalysisError("baud_rate must be positive")
@@ -57,12 +60,17 @@ def decode_uart(wave: Waveform, *, baud_rate: int = 115200, data_bits: int = 8,
         raise AnalysisError("UART requires at least two samples per bit")
     parity_bits = 0 if parity == "none" else 1
     frame_bits = 1 + data_bits + parity_bits + stop_bits
+    bit_width = max(1, int(np.ceil(samples_per_bit)))
     falling = np.flatnonzero(line[:-1] & ~line[1:]) + 1
     frames: list[dict[str, Any]] = []
     next_frame_start = 0
     for start in falling:
         if start < next_frame_start:
             continue  # An edge inside the preceding frame is a data bit, not a new start.
+        # A start bit is a fall out of idle. Require a full bit of high first so
+        # a data toggle is not retried as a new byte.
+        if start < bit_width or not bool(np.all(line[start - bit_width:start])):
+            continue
         centers = np.round(start + (np.arange(frame_bits) + 0.5) * samples_per_bit).astype(int)
         if centers[-1] >= n:
             break
@@ -79,16 +87,20 @@ def decode_uart(wave: Waveform, *, baud_rate: int = 115200, data_bits: int = 8,
         else:
             parity_ok = True
         stop_ok = bool(np.all(values[1 + data_bits + parity_bits:]))
-        frames.append({"start_sample": int(start), "value": value,
-                       "parity_ok": parity_ok, "stop_ok": stop_ok})
-        # Only a frame with valid stop and parity consumes the timeline. A noise
-        # false start with a bad stop/parity must not hide a real byte inside
-        # that nominal window. The next valid byte may begin immediately after
-        # the stop bit(s).
-        if parity_ok and stop_ok:
+        if stop_ok:
+            # Stop defines the frame even when parity fails. Consuming it keeps
+            # data-bit edges from being decoded as extra bytes. The next byte
+            # may begin immediately after the stop bit(s).
+            frames.append({"start_sample": int(start), "value": value,
+                           "parity_ok": parity_ok, "stop_ok": True})
             next_frame_start = int(np.ceil(start + frame_bits * samples_per_bit - 1e-9))
-        if len(frames) >= limit:
-            break
+            if len(frames) >= limit:
+                break
+        else:
+            # A failed stop is a resync, not a byte. Skip one bit and keep
+            # searching so the attempt does not fill the result limit or hide
+            # a later real start.
+            next_frame_start = start + bit_width
     return frames
 
 

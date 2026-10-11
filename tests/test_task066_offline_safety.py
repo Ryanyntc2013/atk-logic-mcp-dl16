@@ -124,17 +124,20 @@ CONFIRM = service.SELF_TEST_CONFIRMATION
 
 def _selftest_setup(monkeypatch):
     monkeypatch.setenv("DL16_BACKEND_MODE", "session")
-    monkeypatch.setattr(backend, "device_busy", lambda: False)
+    monkeypatch.setattr(backend, "claim_for_self_test", lambda: True)
+    monkeypatch.setattr(backend, "release_self_test_claim", lambda: None)
     monkeypatch.setattr(service, "logic_status",
                         lambda: {"connected": True, "ready": True, "details": {"model": "DL16 Plus"}})
 
 
 def test_selftest_refuses_to_preempt_other_owner(monkeypatch):
-    monkeypatch.setattr(backend, "device_busy", lambda: True)
+    monkeypatch.setenv("DL16_BACKEND_MODE", "session")
+    monkeypatch.setattr(backend, "claim_for_self_test", lambda: False)
     monkeypatch.setattr(service, "logic_status", lambda: pytest.fail("hardware accessed"))
     monkeypatch.setattr(service, "logic_pwm", lambda *a, **k: pytest.fail("pwm"))
     result = service.logic_self_test(safety_confirmation=CONFIRM)
     assert result["error_code"] == "SESSION_ALREADY_OWNED"
+    assert "cleanup" not in result
 
 
 def test_selftest_partial_pwm_failure_always_stops_and_closes(monkeypatch):
@@ -271,7 +274,7 @@ def test_uart_rejects_undersampled_baud():
 
 def test_selftest_refuses_oneshot_without_touching_outputs(monkeypatch):
     monkeypatch.delenv("DL16_BACKEND_MODE", raising=False)
-    monkeypatch.setattr(backend, "device_busy", lambda: False)
+    monkeypatch.setattr(backend, "claim_for_self_test", lambda: pytest.fail("claimed"))
     monkeypatch.setattr(service, "logic_status", lambda: pytest.fail("status"))
     monkeypatch.setattr(service, "logic_pwm", lambda *a, **k: pytest.fail("pwm"))
     result = service.logic_self_test(safety_confirmation=CONFIRM)

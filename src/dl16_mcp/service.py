@@ -333,13 +333,13 @@ def logic_self_test(safety_confirmation: str = "") -> dict[str, Any]:
                 "message": "Pass safety_confirmation="
                            "CONFIRMED_SAFE_WIRING_GUI_CLOSED after checking "
                            "PWM0->CH8, PWM1->CH14, safe voltage, and a closed GUI"}
-    if backend.device_busy():
-        return {"success": False, "error_code": "SESSION_ALREADY_OWNED",
-                "message": "Close the existing session and wait for buffer/stream "
-                           "operations before self-test; no output changed"}
     if not backend.session_mode_enabled():
         return {"success": False, "error_code": "SESSION_MODE_REQUIRED",
                 "message": "Self-test drives PWM and capture; set DL16_BACKEND_MODE=session"}
+    if not backend.claim_for_self_test():
+        return {"success": False, "error_code": "SESSION_ALREADY_OWNED",
+                "message": "Close the existing session and wait for buffer/stream "
+                           "operations before self-test; no output changed"}
 
     active_output_possible = False
     active_stream_id: str | None = None
@@ -476,6 +476,7 @@ def logic_self_test(safety_confirmation: str = "") -> dict[str, Any]:
             cleanup["session_close"] = logic_session_close()
         except Exception as exc:
             cleanup["session_close"] = {"success": False, "message": str(exc)}
+        backend.release_self_test_claim()
 
     cleanup_ok = (
         (active_stream_id is None or cleanup.get("stream_finished") is True) and

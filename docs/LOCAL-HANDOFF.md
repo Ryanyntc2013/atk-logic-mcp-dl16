@@ -6,6 +6,10 @@ Offline review fixes are on `fix/DL16-TASK-066-offline-correctness`.
 A numeric loopback pass reports `overall_health: "DIAGNOSTIC_PASS_UNCALIBRATED"`.
 That verdict means the waveform met the numeric check. It is not calibrated timing
 and it is not `HIL_PASS`. Physical acceptance for this branch remains `HIL_NOT_RUN`.
+Follow-up on the same branch: `close()` drops a stuck operation id once the child
+is confirmed gone; an explicit `timeout_s` is checked against the 30 s default
+trigger wait; self-test claims the device before the first PWM; the self-test
+parameter rename is recorded in `CHANGELOG.md`.
 
 # Latest continuation — TASK-064, 2026-10-11
 

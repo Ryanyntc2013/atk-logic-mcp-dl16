@@ -1,8 +1,13 @@
 import json
+import threading
+from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from dl16_mcp import backend
 from dl16_mcp.config import CaptureRequest
+from dl16_mcp.session import SessionFailure
 
 
 def test_invalid_channel_fails_closed():
@@ -321,6 +326,55 @@ def test_close_session_without_owner_is_clean_and_retiring_operation_is_busy():
         assert refused["closed"] is False
     finally:
         backend._SESSION, backend._SESSION_PATH, backend._RETIRING[:] = previous
+
+
+def test_explicit_timeout_covers_default_trigger_wait(monkeypatch):
+    monkeypatch.setattr(backend, "find_native_cli", lambda: None)
+    short = backend.capture(
+        CaptureRequest(channels=(0,), duration_ms=20, trigger="ch0:rising"),
+        timeout_s=20,
+    )
+    assert short["error_code"] == "INVALID_CAPTURE_CONFIG"
+    assert "trigger wait" in short["message"]
+    # Device default wait is 30 s. 40 > 30 + 0.02 + 5, so validation must pass
+    # and stop at the missing CLI rather than launch hardware.
+    accepted = backend.capture(
+        CaptureRequest(channels=(0,), duration_ms=20, trigger="ch0:rising"),
+        timeout_s=40,
+    )
+    assert accepted["error_code"] == "CLI_MISSING"
+
+
+def test_self_test_claim_excludes_other_owners():
+    previous = (backend._SESSION, backend._SESSION_PATH, list(backend._RETIRING), backend._SELF_TEST_CLAIMED)
+    backend._SESSION = None
+    backend._SESSION_PATH = None
+    backend._RETIRING.clear()
+    backend.release_self_test_claim()
+    try:
+        barrier = threading.Barrier(2)
+        results = []
+
+        def contender():
+            barrier.wait(timeout=2)
+            results.append(backend.claim_for_self_test())
+
+        threads = [threading.Thread(target=contender) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=3)
+        assert sorted(results) == [False, True]
+        assert backend.device_busy() is True
+        assert backend.claim_for_self_test() is False
+        with pytest.raises(SessionFailure) as caught:
+            backend._get_session(Path("unused-cli"))
+        assert caught.value.code == "DEVICE_BUSY"
+    finally:
+        backend.release_self_test_claim()
+        backend._SESSION, backend._SESSION_PATH = previous[0], previous[1]
+        backend._RETIRING[:] = previous[2]
+        backend._SELF_TEST_CLAIMED = previous[3]
 
 
 def test_unvalidated_rle_is_not_silently_ignored(monkeypatch):

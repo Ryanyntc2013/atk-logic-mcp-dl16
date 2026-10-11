@@ -20,6 +20,8 @@ from .journal import SessionJournal
 
 MAX_LINE_BYTES = 64 * 1024
 STOP_GRACE_SECONDS = 1.0
+# How long close() waits for an in-flight buffer/stream cancel to finish.
+CANCEL_CLEANUP_SECONDS = 3.0
 
 
 class SessionFailure(RuntimeError):
@@ -64,7 +66,11 @@ class NativeSession:
         return self._closed
 
     def has_active_operation(self) -> bool:
-        """True while an async buffer or stream operation id is still outstanding."""
+        """True while an async buffer or stream operation id is still outstanding.
+
+        ``close()`` clears the id once the child is confirmed gone. A live id
+        with a dead child is not an active operation.
+        """
         operation_id = self._operation_id
         return isinstance(operation_id, str) and bool(operation_id)
 
@@ -329,7 +335,7 @@ class NativeSession:
                         op = self._operation_id
                         kind = getattr(self, "_operation_kind", "capture")
                         self._request_locked({"command": f"{kind}_cancel", "operation_id": op}, timeout_s=1)
-                        deadline = time.monotonic() + 3
+                        deadline = time.monotonic() + CANCEL_CLEANUP_SECONDS
                         while True:
                             response = self._request_locked({"command": f"{kind}_poll", "operation_id": op}, timeout_s=1)
                             if response.get("state") == "finished":
@@ -346,6 +352,12 @@ class NativeSession:
                 except SessionFailure as exc:
                     evidence_error = exc
             cleanup = self._stop_child()
+            # A cancel timeout or an already-dead child used to leave _operation_id
+            # set after the process was gone, so device_busy() stayed true until
+            # the MCP process restarted. Drop the id only once this owner has no
+            # live child. A kill that does not reap the process keeps the id.
+            if _child_confirmed_gone(cleanup):
+                self._operation_id = None
             if self._journal is not None:
                 try:
                     self._record_journal({"type": "cleanup", **cleanup})
@@ -360,6 +372,13 @@ class NativeSession:
             self._closed = True
             if evidence_error is not None:
                 raise evidence_error
+
+
+def _child_confirmed_gone(cleanup: dict[str, Any]) -> bool:
+    """True when close() no longer has a live child that could run the operation."""
+    if cleanup.get("outcome") == "not_started":
+        return True
+    return cleanup.get("returncode") is not None
 
 
 _registered: list[NativeSession] = []
