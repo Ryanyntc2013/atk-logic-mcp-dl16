@@ -428,8 +428,10 @@ def logic_self_test(confirm_safe_wiring: bool = False) -> dict[str, Any]:
         (active_stream_id is None or cleanup.get("stream_finished") is True) and
         all(cleanup.get(f"pwm{i}_stop", {}).get("success") is True
             for i in (0, 1) if active_output_possible) and
-        cleanup.get("session_close", {}).get("success") is True
+        cleanup.get("session_close", {}).get("success") is True and
+        (not active_output_possible or cleanup.get("session_close", {}).get("closed") is True)
     )
+    report["physical_pwm_off_verified"] = False  # requires independent hardware observation
     report["cleanup"] = cleanup
     report["cleanup_ok"] = cleanup_ok
     if not cleanup_ok:
