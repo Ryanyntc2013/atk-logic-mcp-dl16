@@ -72,8 +72,10 @@ def test_filter_of_complete_source_keeps_original_evidence(monkeypatch, tmp_path
 
 def test_uart_back_to_back_bytes_do_not_create_false_frames():
     # 8N1 at 10 samples/bit, no idle gaps between 0x6B DE F6 49.
+    # The opening mark is two bits so the decoder can lock; the bytes themselves
+    # stay back-to-back on a single stop bit.
     values = [0x6B, 0xDE, 0xF6, 0x49]
-    bits = [1] * 10
+    bits = [1] * 20
     for value in values:
         bits += [0] * 10
         for b in range(8):

@@ -39,10 +39,10 @@ def decode_uart(wave: Waveform, *, baud_rate: int = 115200, data_bits: int = 8,
     Idle is high (low when ``invert``). Each frame is sampled at bit centers.
     A valid stop bit consumes the frame even when parity fails. A failed stop
     is not returned and does not use the result limit; the search resumes one
-    bit later, and the next start must then follow more than one bit of idle
-    so a capture that begins mid-frame does not lock onto data edges. A start
-    in an already synchronized stream needs only about half a bit of idle-high,
-    which a short stop bit still satisfies.
+    bit later. The first start, and starts inside the one frame after a stop
+    failure, need more than one bit of idle. After that frame the requirement
+    ends, so later back-to-back bytes can use a single stop bit. Each returned
+    frame carries cumulative ``resync_count`` and ``skipped`` totals.
     """
     if baud_rate <= 0:
         raise AnalysisError("baud_rate must be positive")
@@ -67,27 +67,27 @@ def decode_uart(wave: Waveform, *, baud_rate: int = 115200, data_bits: int = 8,
     # Half a bit of idle-high. samples_per_bit >= 2, so this is at least one
     # sample and never wider than a whole quantized bit.
     idle_need = max(1, int(np.floor(samples_per_bit / 2.0)))
-    # After a rejected stop, one bit of high is indistinguishable from a data
-    # bit. Demand a longer idle before accepting another start.
+    # More than one quantized bit. A single stop or data bit is shorter.
     resync_idle = bit_width + 1
-    falling = np.flatnonzero(line[:-1] & ~line[1:]) + 1
+    falling = [int(index) for index in (np.flatnonzero(line[:-1] & ~line[1:]) + 1)]
     frames: list[dict[str, Any]] = []
     next_frame_start = 0
-    need_long_idle = False
-    for start in falling:
-        if start < next_frame_start:
-            continue  # An edge inside the preceding frame is a data bit, not a new start.
-        # A synchronized start may follow a single short stop bit. A resync
-        # after a bad stop waits for a break longer than one bit.
-        required_idle = resync_idle if need_long_idle else idle_need
-        if start < required_idle or not bool(np.all(line[start - required_idle:start])):
-            continue
+    synced = False
+    resync_count = 0
+    skipped = 0
+
+    def has_idle(start: int, need: int) -> bool:
+        return start >= need and bool(np.all(line[start - need:start]))
+
+    def sample(start: int) -> dict[str, Any] | str:
+        if start < 0:
+            return "no"
         centers = np.round(start + (np.arange(frame_bits) + 0.5) * samples_per_bit).astype(int)
-        if centers[-1] >= n:
-            break
+        if int(centers[-1]) >= n:
+            return "past"
         values = line[centers]
         if values[0]:
-            continue  # start bit not low
+            return "no"
         data = values[1:1 + data_bits]
         value = int(sum(int(bit) << k for k, bit in enumerate(data)))
         ones = int(np.count_nonzero(data))
@@ -98,24 +98,84 @@ def decode_uart(wave: Waveform, *, baud_rate: int = 115200, data_bits: int = 8,
         else:
             parity_ok = True
         stop_ok = bool(np.all(values[1 + data_bits + parity_bits:]))
-        if stop_ok:
-            # Stop defines the frame even when parity fails. Consuming it keeps
-            # data-bit edges from being decoded as extra bytes. The next byte
-            # may begin immediately after the stop bit(s).
-            frames.append({"start_sample": int(start), "value": value,
-                           "parity_ok": parity_ok, "stop_ok": True})
-            need_long_idle = False
-            # Floor keeps a following start that lands on the stop boundary.
-            # Data edges sit at least a stop bit earlier, so they stay inside.
-            next_frame_start = int(np.floor(start + frame_bits * samples_per_bit))
-            if len(frames) >= limit:
+        end = int(np.floor(start + frame_bits * samples_per_bit))
+        return {"value": value, "parity_ok": parity_ok, "stop_ok": stop_ok, "end": end}
+
+    def emit(start: int, frame: dict[str, Any]) -> bool:
+        nonlocal next_frame_start, synced
+        synced = True
+        frames.append({"start_sample": int(start), "value": frame["value"],
+                       "parity_ok": frame["parity_ok"], "stop_ok": True,
+                       "resync_count": resync_count, "skipped": skipped})
+        next_frame_start = int(frame["end"])
+        return len(frames) >= limit
+
+    index = 0
+    while index < len(falling):
+        start = falling[index]
+        if start < next_frame_start:
+            skipped += 1
+            index += 1
+            continue
+        require_long = not synced
+        if require_long and not has_idle(start, resync_idle):
+            index += 1
+            continue
+        if synced and not has_idle(start, idle_need):
+            index += 1
+            continue
+        frame = sample(start)
+        if frame == "past":
+            break
+        if not isinstance(frame, dict):
+            index += 1
+            continue
+        if frame["stop_ok"]:
+            if emit(start, frame):
                 break
-        else:
-            # A failed stop is a resync, not a byte. Skip one bit and require
-            # a longer idle before the next start, so data edges in a capture
-            # that began mid-frame are not returned as bytes.
-            need_long_idle = True
-            next_frame_start = start + bit_width
+            index += 1
+            continue
+        # Bad stop. Look ahead at most one frame: a long-idle byte sooner
+        # (a glitch in front of a real byte), otherwise the next timed slot
+        # so back-to-back bytes resume. Do not keep rejecting short idles.
+        resync_count += 1
+        skipped += 1
+        predicted = int(np.floor(start + frame_bits * samples_per_bit))
+        recovered = False
+        scan = index + 1
+        while scan < len(falling) and falling[scan] < predicted:
+            edge = falling[scan]
+            if edge < start + bit_width:
+                skipped += 1
+                scan += 1
+                continue
+            if has_idle(edge, resync_idle):
+                early = sample(edge)
+                if early == "past":
+                    break
+                if isinstance(early, dict) and early["stop_ok"]:
+                    if emit(edge, early):
+                        return frames
+                    recovered = True
+                    index = scan + 1
+                    break
+                if isinstance(early, dict) and not early["stop_ok"]:
+                    resync_count += 1
+            skipped += 1
+            scan += 1
+        if recovered:
+            continue
+        # The slot one frame later is the next byte even when its stop-bit
+        # predecessor was low, so do not demand idle there.
+        slotted = sample(predicted)
+        if isinstance(slotted, dict) and slotted["stop_ok"]:
+            if emit(predicted, slotted):
+                break
+            next_frame_start = max(next_frame_start, predicted + bit_width)
+            index = scan
+            continue
+        next_frame_start = predicted + bit_width
+        index = scan
     return frames
 
 
