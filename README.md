@@ -72,7 +72,7 @@ command = "C:\\path\\to\\atk-logic-mcp-dl16\\.venv\\Scripts\\python.exe"
 args = ["-m", "dl16_mcp.server"]
 ```
 
-For Cursor, add to `.cursor/mcp.json` or the user's MCP settings, with a **full absolute** path:
+For Cursor, copy [`.cursor/mcp.json.example`](.cursor/mcp.json.example) to `.cursor/mcp.json` (gitignored; do not commit machine paths) or edit the user's MCP settings. Use a **full absolute** path:
 
 ```json
 {
@@ -119,7 +119,7 @@ See [TASK-020 session journal](docs/tasks/DL16-TASK-020-session-evidence-journal
 | Tool | Status | Description |
 |---|---|---|
 | `logic_status` | Native adapter (cached in session mode) | Device identification, firmware, USB state |
-| `logic_self_test` | End-to-end automated HIL tool | Automated health check across USB link, dual PWM, 20MHz Buffer and 1MHz Stream captures |
+| `logic_self_test` | Session-mode diagnostic | Real PWM0/PWM1 loopback on CH8/CH14. Requires exact `CONFIRMED_SAFE_WIRING_GUI_CLOSED`. A pass is `DIAGNOSTIC_PASS_UNCALIBRATED`, not a calibration |
 | `logic_capture` | Native adapter; gating/position HIL-verified | Bounded buffer capture; edge/level and multi-channel AND triggers gate (10-byte payload); `trigger_position_percent` sets pre-trigger |
 | `logic_buffer_start` | Native async adapter | Start asynchronous bounded Buffer capture with cooperative cancellation |
 | `logic_buffer_poll` | Native async adapter | Poll bounded asynchronous Buffer status and completion |

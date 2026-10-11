@@ -117,7 +117,7 @@ def fault_injection(service, name: str, events: list[str]):
 
 def _postflight(service, backend) -> dict:
     """Status only after successful software cleanup; no implicit reset/retry."""
-    if backend.has_owned_session():
+    if backend.device_busy():
         return {"success": False, "error_code": "OWNER_STILL_PRESENT"}
     try:
         status = service.logic_status()
@@ -155,7 +155,7 @@ def execute_hil(args: argparse.Namespace) -> int:
     if backend.find_native_cli() is None:
         print("REFUSED: pinned patched native CLI not found.", file=sys.stderr)
         return 2
-    if backend.has_owned_session():
+    if backend.device_busy():
         print("REFUSED: another operation owns this Python MCP session.", file=sys.stderr)
         return 2
 
@@ -180,7 +180,7 @@ def execute_hil(args: argparse.Namespace) -> int:
     postflight = {"success": False, "reason": "not attempted"}
     try:
         with fault_injection(service, args.case, events):
-            result = service.logic_self_test(confirm_safe_wiring=True)
+            result = service.logic_self_test(safety_confirmation=service.SELF_TEST_CONFIRMATION)
         # Only attempt fresh session after the self-test confirms its own cleanup.
         if result.get("cleanup_ok") is True:
             postflight = _postflight(service, backend)
@@ -190,7 +190,7 @@ def execute_hil(args: argparse.Namespace) -> int:
         result = {"success": False, "error_code": "HARNESS_EXCEPTION", "message": str(exc)}
     finally:
         # Never hide failures; best-effort close existing owned worker, no USB resets.
-        if backend.has_owned_session():
+        if backend.device_busy():
             try:
                 events.append("FINAL_BEST_EFFORT_CLOSE")
                 result["harness_final_close"] = service.logic_session_close()

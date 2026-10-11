@@ -59,6 +59,15 @@ class NativeSession:
     def failed(self) -> bool:
         return self._failed
 
+    @property
+    def is_closed(self) -> bool:
+        return self._closed
+
+    def has_active_operation(self) -> bool:
+        """True while an async buffer or stream operation id is still outstanding."""
+        operation_id = self._operation_id
+        return isinstance(operation_id, str) and bool(operation_id)
+
     def _start(self) -> None:
         if self._closed:
             raise SessionFailure("SESSION_CLOSED", "native session has been closed")

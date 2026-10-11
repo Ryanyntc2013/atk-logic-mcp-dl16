@@ -1,8 +1,9 @@
 """Pure offline signal analysis. No native library, USB or MCP imports required."""
 from __future__ import annotations
 
-from typing import Any
 import math
+from itertools import chain
+from typing import Any
 
 import numpy as np
 
@@ -187,9 +188,22 @@ def preview_edges(wave: Waveform, *, polarity: str = "rising", limit: int = 50) 
 
 def digital_transitions(raw: bytes, sample_count: int,
                         *, max_edges: int = 2_000_000) -> tuple[np.ndarray, np.ndarray]:
-    """All level changes as (sample_index, new_level) in chronological order."""
+    """All level changes as (sample_index, new_level) in chronological order.
+
+    ``max_edges`` is a combined cap. Rising and falling edges share one budget so
+    the result cannot grow to twice the requested limit.
+    """
+    if max_edges < 1:
+        raise AnalysisError("max_edges must be positive")
     rising = digital_edges(raw, sample_count, rising=True, max_edges=max_edges)
-    falling = digital_edges(raw, sample_count, rising=False, max_edges=max_edges)
+    remaining = max_edges - len(rising)
+    if remaining < 1:
+        # A single falling edge would exceed the shared budget.
+        if len(digital_edges(raw, sample_count, rising=False, max_edges=1)):
+            raise AnalysisError("Too many edges: narrow the analysis window or increase max_edges")
+        falling = np.empty(0, dtype=np.int64)
+    else:
+        falling = digital_edges(raw, sample_count, rising=False, max_edges=remaining)
     idx = np.concatenate((rising, falling))
     lvl = np.concatenate((np.ones(rising.shape, dtype=np.uint8),
                           np.zeros(falling.shape, dtype=np.uint8)))
@@ -295,7 +309,6 @@ def glitch_filter(raw: bytes, sample_count: int, *, min_pulse_samples: int,
     start = 0
     stable_level: int | None = None
     removed = 0
-    from itertools import chain
     for end in chain(transitions, (sample_count,)):
         end = int(end)
         if end - start >= min_pulse_samples:

@@ -1,9 +1,10 @@
 """Application layer shared by MCP tools and local CLI."""
 from __future__ import annotations
 
-import json
-import re
 import hashlib
+import json
+import os
+import re
 from typing import Any
 
 from . import backend
@@ -41,7 +42,7 @@ def logic_status() -> dict[str, Any]:
 
 def logic_capture(channels: list[int] | None = None, sample_rate_hz: int = 20_000_000,
                   duration_ms: int = 20, threshold_voltage: float = 1.6,
-                  trigger: str = "immediate", timeout_s: float = 45.0,
+                  trigger: str = "immediate", timeout_s: float | None = None,
                   trigger_position_percent: float | None = None,
                   trigger_timeout_sec: int | None = None) -> dict[str, Any]:
     return backend.capture(CaptureRequest(tuple(channels if channels is not None else [0, 1]),
@@ -197,8 +198,10 @@ def logic_filter(capture_id: str, channel: int, min_pulse_samples: int,
             from shutil import copyfile
             for ch, _, source_path in other_channels:
                 copyfile(source_path, folder / f"ch{ch:02d}.bits")
-            # Publish metadata LAST; an interrupted write cannot be mistaken for complete.
-            (folder / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+            # Publish metadata last, via rename, so readers never see a partial meta.json.
+            partial_meta = folder / "meta.json.partial"
+            partial_meta.write_text(json.dumps(meta), encoding="utf-8")
+            os.replace(partial_meta, folder / "meta.json")
         except BaseException:
             # Only delete the newly-created folder; never remove an existing capture.
             from shutil import rmtree
@@ -208,7 +211,7 @@ def logic_filter(capture_id: str, channel: int, min_pulse_samples: int,
                 "removed_pulses": removed, "path": str(folder),
                 "source_evidence": wave.source, "source_integrity": wave.integrity,
                 "source_sha256": meta["source_sha256"], "integrity": meta["data_integrity"]}
-    except (ValueError, FileNotFoundError, OSError, KeyError) as exc:
+    except (ValueError, FileNotFoundError, OSError, KeyError, TypeError) as exc:
         return {"success": False, "error_code": "FILTER_FAILED", "message": str(exc)}
 
 
@@ -303,16 +306,40 @@ def logic_buffer_cancel(operation_id: str) -> dict[str, Any]:
     return backend.buffer_control(operation_id, cancel=True)
 
 
-def logic_self_test(confirm_safe_wiring: bool = False) -> dict[str, Any]:
-    """Bounded loopback diagnostic. Never steal an existing session or certify calibration."""
+SELF_TEST_CONFIRMATION = "CONFIRMED_SAFE_WIRING_GUI_CLOSED"
+
+
+def _close_result_is_clean(result: dict[str, Any]) -> bool:
+    """A successful close is clean whether or not a session object was present.
+
+    ``closed: False`` with ``success: True`` means nothing was open (oneshot, or
+    the backend already dropped the owner after its own cleanup). A failed close
+    is never clean.
+    """
+    return result.get("success") is True and result.get("closed") in (True, False)
+
+
+def logic_self_test(safety_confirmation: str = "") -> dict[str, Any]:
+    """Bounded loopback diagnostic. Never steal an existing session or certify calibration.
+
+    Drives real PWM0 and PWM1. Requires PWM0 wired to CH8, PWM1 wired to CH14,
+    safe voltage, and the ATK-Logic GUI closed. Refuses oneshot mode and any
+    busy session or in-flight buffer/stream operation.
+    """
     import time
 
-    if not confirm_safe_wiring:
+    if safety_confirmation != SELF_TEST_CONFIRMATION:
         return {"success": False, "error_code": "SAFETY_CONFIRMATION_REQUIRED",
-                "message": "Confirm PWM0->CH8, PWM1->CH14 and closed GUI before self-test"}
-    if backend.has_owned_session():
+                "message": "Pass safety_confirmation="
+                           "CONFIRMED_SAFE_WIRING_GUI_CLOSED after checking "
+                           "PWM0->CH8, PWM1->CH14, safe voltage, and a closed GUI"}
+    if backend.device_busy():
         return {"success": False, "error_code": "SESSION_ALREADY_OWNED",
-                "message": "Close the existing session explicitly before self-test; no output changed"}
+                "message": "Close the existing session and wait for buffer/stream "
+                           "operations before self-test; no output changed"}
+    if not backend.session_mode_enabled():
+        return {"success": False, "error_code": "SESSION_MODE_REQUIRED",
+                "message": "Self-test drives PWM and capture; set DL16_BACKEND_MODE=session"}
 
     active_output_possible = False
     active_stream_id: str | None = None
@@ -346,7 +373,7 @@ def logic_self_test(confirm_safe_wiring: bool = False) -> dict[str, Any]:
         # Existing test procedure uses separate native owners for Buffer and Stream.
         # Verify cleanup before starting a second owner; do not assume close worked.
         closed = logic_session_close()
-        if not closed.get("success") or closed.get("closed") is not True:
+        if not _close_result_is_clean(closed):
             return {"success": False, "error_code": "INTERMEDIATE_CLOSE_FAILED", "close": closed}
         active_output_possible = True
         p0 = logic_pwm(0, "configure", 1000, 50.0, confirm_safe_wiring=True)
@@ -362,9 +389,13 @@ def logic_self_test(confirm_safe_wiring: bool = False) -> dict[str, Any]:
             channels=[8, 14], sample_rate_hz=1_000_000,
             duration_ms=100, threshold_voltage=1.6)
         op_id = started.get("operation_id")
-        if not started.get("ok", started.get("success", bool(op_id))) or not isinstance(op_id, str) or not op_id:
+        # A failed start can still return an operation id. Remember it before
+        # returning so the finally block cancels that owner.
+        if isinstance(op_id, str) and op_id:
+            active_stream_id = op_id
+        accepted = started.get("ok", started.get("success", bool(op_id)))
+        if not accepted or not isinstance(op_id, str) or not op_id:
             return {"success": False, "error_code": "STREAM_START_FAILED", "stream_start": started}
-        active_stream_id = op_id
 
         deadline = time.monotonic() + 10.0
         while time.monotonic() < deadline:
@@ -450,8 +481,7 @@ def logic_self_test(confirm_safe_wiring: bool = False) -> dict[str, Any]:
         (active_stream_id is None or cleanup.get("stream_finished") is True) and
         all(cleanup.get(f"pwm{i}_stop", {}).get("success") is True
             for i in (0, 1) if active_output_possible) and
-        cleanup.get("session_close", {}).get("success") is True and
-        (not active_output_possible or cleanup.get("session_close", {}).get("closed") is True)
+        _close_result_is_clean(cleanup.get("session_close", {}))
     )
     report["physical_pwm_off_verified"] = False  # requires independent hardware observation
     report["cleanup"] = cleanup

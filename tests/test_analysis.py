@@ -119,6 +119,20 @@ def test_glitch_filter_removes_short_pulses():
     assert removed == 1
 
 
+def test_glitch_filter_combined_edge_cap_is_not_twice_max_edges():
+    # 4 rising + 4 falling. A per-polarity budget of 4 would accept all 8.
+    bits = [0, 1] * 4 + [0]
+    raw = np.packbits(np.asarray(bits, dtype=np.uint8), bitorder="little").tobytes()
+    with pytest.raises(AnalysisError, match="Too many edges"):
+        digital_transitions(raw, len(bits), max_edges=4)
+    with pytest.raises(AnalysisError, match="Too many"):
+        glitch_filter(raw, len(bits), min_pulse_samples=1, max_edges=4)
+    short = [0, 1, 0, 1, 0]
+    short_raw = np.packbits(np.asarray(short, dtype=np.uint8), bitorder="little").tobytes()
+    idx, _ = digital_transitions(short_raw, len(short), max_edges=4)
+    assert len(idx) == 4
+
+
 def test_glitch_filter_leading_short_run_takes_next_level():
     w = wave(0, [1, 0, 0, 0])
     filtered, removed = glitch_filter(w.raw, w.samples, min_pulse_samples=3)

@@ -53,16 +53,75 @@ _RETRYABLE_OPEN_FRAGMENT = "failed to parse fpga device info"
 _SESSION_LOCK = threading.Lock()
 _SESSION: NativeSession | None = None
 _SESSION_PATH: Path | None = None
+# Sessions removed from _SESSION while close() or an async op may still hold USB.
+_RETIRING: list[NativeSession] = []
+_HOST_TIMEOUT_DEFAULT_S = 45.0
+_HOST_TIMEOUT_EXPLICIT_MAX_S = 3600.0
+# A documented 3600 s trigger wait plus capture duration does not fit in 3600 s.
+_HOST_TIMEOUT_DERIVED_MAX_S = 7200.0
+_CLEANUP_MARGIN_S = 5.0
 
 
 def _session_enabled() -> bool:
     return os.environ.get("DL16_BACKEND_MODE", "oneshot").strip().lower() == "session"
 
 
+def session_mode_enabled() -> bool:
+    return _session_enabled()
+
+
+def _owner_still_busy(session: Any) -> bool:
+    is_closed = getattr(session, "is_closed", True)
+    if not isinstance(is_closed, bool):
+        is_closed = True
+    has_operation = getattr(session, "has_active_operation", None)
+    active = bool(has_operation()) if callable(has_operation) else False
+    return (not is_closed) or active
+
+
 def has_owned_session() -> bool:
-    """Conservative guard: self-test must not preempt an existing MCP owner."""
+    """True when this process still holds a native session that has not been closed."""
     with _SESSION_LOCK:
-        return _SESSION is not None and not getattr(_SESSION, "_closed", False)
+        session = _SESSION
+    return session is not None and not bool(getattr(session, "is_closed", False))
+
+
+def device_busy() -> bool:
+    """True when a live session, a retiring owner, or an in-flight buffer/stream holds the device.
+
+    An async operation can outlive the ``_SESSION`` pointer: close removes that
+    pointer before cancel finishes, and a failed cancel can leave the operation
+    id set after ``is_closed`` becomes true.
+    """
+    with _SESSION_LOCK:
+        sessions = [session for session in (_SESSION, *_RETIRING) if session is not None]
+    return any(_owner_still_busy(session) for session in sessions)
+
+
+def _track_retiring(session: NativeSession) -> None:
+    global _SESSION, _SESSION_PATH
+    with _SESSION_LOCK:
+        if _SESSION is session:
+            _SESSION = None
+            _SESSION_PATH = None
+        if session not in _RETIRING:
+            _RETIRING.append(session)
+
+
+def _finish_retire(session: NativeSession) -> dict[str, Any]:
+    _track_retiring(session)
+    try:
+        session.close()
+        result: dict[str, Any] = {"success": True, "closed": True}
+    except SessionFailure as exc:
+        result = {"success": False, "closed": True, "error_code": exc.code, "message": str(exc)}
+    with _SESSION_LOCK:
+        if not _owner_still_busy(session):
+            try:
+                _RETIRING.remove(session)
+            except ValueError:
+                pass
+    return result
 
 
 def _get_session(cli: Path) -> NativeSession:
@@ -147,7 +206,34 @@ def _status_once(cli: Path) -> dict[str, Any]:
             "attempts": attempt, "retry_log": retry_log}
 
 
-def capture(request: CaptureRequest, timeout_s: float = 45.0,
+def _resolve_host_timeout(request: CaptureRequest, timeout_s: float | None,
+                          trigger_timeout_sec: int | None) -> float:
+    """Use an explicit host deadline, or expand the default so a trigger wait fits.
+
+    The historical default of 45 s rejects documented trigger waits above about
+    40 s. Omitted timeouts grow to cover the device wait, capture duration, and
+    cleanup margin. Explicit timeouts stay on the 1..3600 s contract.
+    """
+    if timeout_s is not None:
+        if (isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float))
+                or not 1.0 <= float(timeout_s) <= _HOST_TIMEOUT_EXPLICIT_MAX_S):
+            raise ValueError("timeout_s must be from 1 to 3600 seconds")
+        resolved = float(timeout_s)
+        if (request.trigger != "immediate" and trigger_timeout_sec is not None
+                and resolved <= trigger_timeout_sec + request.duration_ms / 1000 + _CLEANUP_MARGIN_S):
+            raise ValueError("Host timeout must exceed trigger wait + capture duration + 5s cleanup margin")
+        return resolved
+    resolved = _HOST_TIMEOUT_DEFAULT_S
+    if request.trigger != "immediate":
+        wait = 30 if trigger_timeout_sec is None else trigger_timeout_sec
+        needed = float(wait) + request.duration_ms / 1000 + _CLEANUP_MARGIN_S + 1.0
+        resolved = max(resolved, needed)
+    if resolved > _HOST_TIMEOUT_DERIVED_MAX_S:
+        raise ValueError("Derived host timeout exceeds 7200 seconds")
+    return resolved
+
+
+def capture(request: CaptureRequest, timeout_s: float | None = None,
             trigger_position_percent: float | None = None,
             trigger_timeout_sec: int | None = None,
             raw_rx_path: str | Path | None = None,
@@ -169,16 +255,11 @@ def capture(request: CaptureRequest, timeout_s: float = 45.0,
             return {"success": False, "error_code": "RLE_NOT_VALIDATED",
                     "evidence_source": "NONE", "data_integrity": "UNKNOWN",
                     "message": "Hardware RLE framing and bounded expansion are not validated; request not sent"}
-        if not 1.0 <= timeout_s <= 3600:
-            raise ValueError("timeout_s must be from 1 to 3600 seconds")
         if trigger_position_percent is not None and not 0.0 <= trigger_position_percent <= 100.0:
             raise ValueError("trigger_position_percent must be within [0, 100]")
         if trigger_timeout_sec is not None and not 1 <= trigger_timeout_sec <= 3600:
             raise ValueError("trigger_timeout_sec must be from 1 to 3600")
-        # An explicit device wait must fit inside the host deadline with transfer/cleanup slack.
-        if (request.trigger != "immediate" and trigger_timeout_sec is not None
-                and timeout_s <= trigger_timeout_sec + request.duration_ms / 1000 + 5):
-            raise ValueError("Host timeout must exceed trigger wait + capture duration + 5s cleanup margin")
+        timeout_s = _resolve_host_timeout(request, timeout_s, trigger_timeout_sec)
     except (ValueError, TypeError) as exc:
         return {"success": False, "error_code": "INVALID_CAPTURE_CONFIG", "message": str(exc),
                 "data_integrity": "UNKNOWN", "evidence_source": "NONE"}
@@ -224,16 +305,12 @@ def capture(request: CaptureRequest, timeout_s: float = 45.0,
             if not doc.get("success"):
                 # An incomplete or timed-out acquisition cannot safely reuse device state.
                 session = _get_session(cli)
-                try:
-                    session.close()
+                closed = _finish_retire(session)
+                if closed.get("success"):
                     doc["session_cleanup"] = "closed"
-                except SessionFailure as cleanup:
-                    doc["session_cleanup"] = {"error_code": cleanup.code, "message": str(cleanup)}
-                with _SESSION_LOCK:
-                    global _SESSION, _SESSION_PATH
-                    if _SESSION is session:
-                        _SESSION = None
-                        _SESSION_PATH = None
+                else:
+                    doc["session_cleanup"] = {"error_code": closed.get("error_code"),
+                                              "message": closed.get("message")}
                 doc["session_invalidated"] = True
             doc["backend"] = "native-session"
             doc["attempts"] = 1
@@ -340,13 +417,15 @@ def close_session() -> dict[str, Any]:
     with _SESSION_LOCK:
         session, _SESSION = _SESSION, None
         _SESSION_PATH = None
+        still_busy = any(item is not session and _owner_still_busy(item) for item in _RETIRING)
     if session is None:
+        # No owner was installed. That is clean unless a previous close left an
+        # operation or process still holding the device.
+        if still_busy:
+            return {"success": False, "closed": False, "error_code": "DEVICE_STILL_BUSY",
+                    "message": "A previous owner is still closing or has an active buffer/stream operation"}
         return {"success": True, "closed": False}
-    try:
-        session.close()
-        return {"success": True, "closed": True}
-    except SessionFailure as exc:
-        return {"success": False, "closed": True, "error_code": exc.code, "message": str(exc)}
+    return _finish_retire(session)
 
 
 def stream_start(*, experimental_opt_in: bool = False, safety_confirmation: str = "",

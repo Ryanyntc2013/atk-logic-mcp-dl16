@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 from . import service
 
 mcp = FastMCP("atk-logic-mcp-dl16")
@@ -90,14 +91,16 @@ def logic_status() -> dict:
 @mcp.tool()
 def logic_capture(channels: list[int] | None = None, sample_rate_hz: int = 20_000_000,
                   duration_ms: int = 20, threshold_voltage: float = 1.6,
-                  trigger: str = "immediate", timeout_s: float = 45.0,
+                  trigger: str = "immediate", timeout_s: float | None = None,
                   trigger_position_percent: float | None = None,
                   trigger_timeout_sec: int | None = None) -> dict:
     """Capture to disk using native CLI. No simulated waveform ever returned as hardware.
 
     Buffer mode only. Edge/level and multi-channel AND triggers gate on this firmware
     (10-byte payload). trigger_position_percent sets the pre-trigger position;
-    trigger_timeout_sec bounds the device trigger wait (default 30 s).
+    trigger_timeout_sec bounds the device trigger wait (1..3600 s, default 30 s).
+    Omit timeout_s to expand the host deadline so that wait fits; an explicit
+    timeout_s must still exceed trigger wait + duration + 5 s.
     """
     return service.logic_capture(channels, sample_rate_hz, duration_ms,
                                  threshold_voltage, trigger, timeout_s,
@@ -171,10 +174,17 @@ def logic_decode(capture_id: str, protocol: str, channels: list[int],
                                 bit_order, bits_per_word)
 
 
-@mcp.tool()
-def logic_self_test(confirm_safe_wiring: bool = False) -> dict:
-    """Run automated hardware end-to-end self-test on loopback channels (CH8=PWM0, CH14=PWM1)."""
-    return service.logic_self_test(confirm_safe_wiring=confirm_safe_wiring)
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=True, openWorldHint=True, readOnlyHint=False))
+def logic_self_test(safety_confirmation: str = "") -> dict:
+    """Drive real PWM0/PWM1 and capture the CH8/CH14 loopback. Not a calibration.
+
+    Requires safety_confirmation exactly equal to CONFIRMED_SAFE_WIRING_GUI_CLOSED.
+    Risks: enables hardware PWM, needs PWM0 wired to CH8 and PWM1 wired to CH14
+    at a safe voltage, requires the ATK-Logic GUI to be closed, and takes the USB
+    device. Refuses oneshot mode and any busy session or in-flight buffer/stream.
+    A numeric pass is DIAGNOSTIC_PASS_UNCALIBRATED, not calibrated timing or HIL_PASS.
+    """
+    return service.logic_self_test(safety_confirmation=safety_confirmation)
 
 
 def main() -> None:

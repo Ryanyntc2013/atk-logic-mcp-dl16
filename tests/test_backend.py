@@ -276,6 +276,13 @@ def test_native_capture_failure_closes_session_without_replay(monkeypatch, tmp_p
         def request(self, request, timeout_s):
             self.requests += 1
             return {"result": {"success": False, "error_code": "CAPTURE_TIMEOUT"}}
+        @property
+        def is_closed(self):
+            return self.closed
+
+        def has_active_operation(self):
+            return False
+
         def close(self):
             self.closed = True
 
@@ -285,6 +292,35 @@ def test_native_capture_failure_closes_session_without_replay(monkeypatch, tmp_p
     assert session.requests == 1 and session.closed
     assert result["error_code"] == "CAPTURE_TIMEOUT"
     assert result["session_invalidated"] is True
+
+
+def test_close_session_without_owner_is_clean_and_retiring_operation_is_busy():
+    previous = (backend._SESSION, backend._SESSION_PATH, list(backend._RETIRING))
+    backend._SESSION = None
+    backend._SESSION_PATH = None
+    backend._RETIRING.clear()
+    try:
+        assert backend.close_session() == {"success": True, "closed": False}
+        assert backend.device_busy() is False
+
+        class Owner:
+            is_closed = True
+
+            def has_active_operation(self):
+                return True
+
+        owner = Owner()
+        backend._SESSION = owner
+        assert backend.has_owned_session() is False
+        assert backend.device_busy() is True
+        backend._SESSION = None
+        backend._RETIRING.append(owner)
+        refused = backend.close_session()
+        assert refused["success"] is False
+        assert refused["error_code"] == "DEVICE_STILL_BUSY"
+        assert refused["closed"] is False
+    finally:
+        backend._SESSION, backend._SESSION_PATH, backend._RETIRING[:] = previous
 
 
 def test_unvalidated_rle_is_not_silently_ignored(monkeypatch):

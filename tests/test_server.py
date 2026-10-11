@@ -32,8 +32,19 @@ def test_no_raw_or_firmware_tools_exposed():
     assert names.isdisjoint(forbidden)
 
 
-def test_self_test_requires_safety_confirmation():
-    res = server.logic_self_test(confirm_safe_wiring=False)
+def test_self_test_requires_exact_safety_confirmation():
+    res = server.logic_self_test(safety_confirmation="")
     assert res["success"] is False
     assert res["error_code"] == "SAFETY_CONFIRMATION_REQUIRED"
+    res = server.logic_self_test(safety_confirmation="true")
+    assert res["error_code"] == "SAFETY_CONFIRMATION_REQUIRED"
+
+
+def test_self_test_tool_is_marked_destructive():
+    tools = asyncio.run(server.mcp.list_tools())
+    tool = next(item for item in tools if item.name == "logic_self_test")
+    assert tool.annotations is not None
+    assert tool.annotations.destructiveHint is True
+    assert tool.annotations.openWorldHint is True
+    assert tool.annotations.readOnlyHint is False
 

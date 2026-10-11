@@ -119,16 +119,21 @@ def test_stream_explicit_valid_samples_and_untrusted_padding(monkeypatch, tmp_pa
     assert wave.integrity == "UNVERIFIED"
 
 
+CONFIRM = service.SELF_TEST_CONFIRMATION
+
+
 def _selftest_setup(monkeypatch):
-    monkeypatch.setattr(backend, "has_owned_session", lambda: False)
+    monkeypatch.setenv("DL16_BACKEND_MODE", "session")
+    monkeypatch.setattr(backend, "device_busy", lambda: False)
     monkeypatch.setattr(service, "logic_status",
                         lambda: {"connected": True, "ready": True, "details": {"model": "DL16 Plus"}})
 
 
 def test_selftest_refuses_to_preempt_other_owner(monkeypatch):
-    monkeypatch.setattr(backend, "has_owned_session", lambda: True)
+    monkeypatch.setattr(backend, "device_busy", lambda: True)
     monkeypatch.setattr(service, "logic_status", lambda: pytest.fail("hardware accessed"))
-    result = service.logic_self_test(confirm_safe_wiring=True)
+    monkeypatch.setattr(service, "logic_pwm", lambda *a, **k: pytest.fail("pwm"))
+    result = service.logic_self_test(safety_confirmation=CONFIRM)
     assert result["error_code"] == "SESSION_ALREADY_OWNED"
 
 
@@ -143,7 +148,7 @@ def test_selftest_partial_pwm_failure_always_stops_and_closes(monkeypatch):
     monkeypatch.setattr(service, "logic_pwm", pwm)
     monkeypatch.setattr(service, "logic_session_close", lambda: calls.append(("close",)) or {"success": True, "closed": True})
     monkeypatch.setattr(service, "logic_capture", lambda **k: pytest.fail("capture should not start"))
-    result = service.logic_self_test(confirm_safe_wiring=True)
+    result = service.logic_self_test(safety_confirmation=CONFIRM)
     assert result["error_code"] == "PWM_CONFIG_FAILED"
     assert (0, "stop") in calls and (1, "stop") in calls and ("close",) in calls
     assert result["cleanup_ok"] is True
@@ -155,7 +160,7 @@ def test_selftest_failed_pwm_cleanup_never_returns_healthy(monkeypatch):
         return {"success": action == "configure" and output == 0}
     monkeypatch.setattr(service, "logic_pwm", pwm)
     monkeypatch.setattr(service, "logic_session_close", lambda: {"success": False})
-    result = service.logic_self_test(confirm_safe_wiring=True)
+    result = service.logic_self_test(safety_confirmation=CONFIRM)
     assert result["success"] is False
     assert result["cleanup_ok"] is False
     assert result["overall_health"] == "UNVERIFIED_CLEANUP"
@@ -174,7 +179,7 @@ def test_selftest_stream_poll_error_requests_cancel(monkeypatch):
                         lambda operation_id: {"success": False, "error_code": "SIMULATED"})
     monkeypatch.setattr(service, "logic_stream_cancel",
                         lambda operation_id: actions.append("cancel") or {"success": True})
-    result = service.logic_self_test(confirm_safe_wiring=True)
+    result = service.logic_self_test(safety_confirmation=CONFIRM)
     assert result["success"] is False
     assert "cancel" in actions
     assert "close" in actions
@@ -222,7 +227,7 @@ def test_selftest_normal_fixture_is_uncalibrated_not_healthy(monkeypatch):
                         lambda op: {"state": "finished", "response": {"result": {
                             "reason": "DEADLINE", "cleanup_stop_ok": True,
                             "stored_bytes": 32000, "artifact_directory": "captures/stream-id"}}})
-    result = service.logic_self_test(confirm_safe_wiring=True)
+    result = service.logic_self_test(safety_confirmation=CONFIRM)
     assert result["success"] is True
     assert result["overall_health"] == "DIAGNOSTIC_PASS_UNCALIBRATED"
     assert result["stream_capture"]["data_integrity"] == "INCOMPLETE"
@@ -262,3 +267,123 @@ def test_uart_rejects_undersampled_baud():
     wave = Waveform(0, b"\x00\xff", 16, 1_000_000, "UNVERIFIED", "SYNTHETIC", {})
     with pytest.raises(AnalysisError, match="two samples per bit"):
         decode_uart(wave, baud_rate=750_000)
+
+
+def test_selftest_refuses_oneshot_without_touching_outputs(monkeypatch):
+    monkeypatch.delenv("DL16_BACKEND_MODE", raising=False)
+    monkeypatch.setattr(backend, "device_busy", lambda: False)
+    monkeypatch.setattr(service, "logic_status", lambda: pytest.fail("status"))
+    monkeypatch.setattr(service, "logic_pwm", lambda *a, **k: pytest.fail("pwm"))
+    result = service.logic_self_test(safety_confirmation=CONFIRM)
+    assert result["success"] is False
+    assert result["error_code"] == "SESSION_MODE_REQUIRED"
+    assert "cleanup" not in result
+
+
+def test_selftest_stream_start_failure_still_cancels_operation(monkeypatch):
+    _selftest_setup(monkeypatch)
+    actions = []
+    monkeypatch.setattr(service, "logic_pwm", lambda *a, **kw: {"success": True})
+    monkeypatch.setattr(service, "logic_capture", lambda **kw: {"success": True, "capture_id": "buffer"})
+    monkeypatch.setattr(service, "logic_measure_pwm",
+                        lambda cid, ch: {"frequency_hz_median": 1000 if ch == 8 else 2000})
+    monkeypatch.setattr(service, "logic_session_close",
+                        lambda: actions.append("close") or {"success": True, "closed": True})
+    monkeypatch.setattr(service, "logic_stream_start",
+                        lambda **kw: {"success": False, "operation_id": "leaked-op"})
+    monkeypatch.setattr(service, "logic_stream_cancel",
+                        lambda operation_id: actions.append(("cancel", operation_id)) or {"success": True})
+    monkeypatch.setattr(service, "logic_stream_poll",
+                        lambda operation_id: {"state": "finished"})
+    result = service.logic_self_test(safety_confirmation=CONFIRM)
+    assert result["error_code"] == "STREAM_START_FAILED"
+    assert ("cancel", "leaked-op") in actions
+    assert result["cleanup"].get("stream_finished") is True
+
+
+def test_selftest_absent_session_close_is_clean(monkeypatch):
+    _selftest_setup(monkeypatch)
+    monkeypatch.setattr(service, "logic_pwm", lambda *a, **kw: {"success": True})
+    monkeypatch.setattr(service, "logic_capture",
+                        lambda **kw: {"success": True, "capture_id": "buffer-id"})
+    monkeypatch.setattr(service, "logic_measure_pwm",
+                        lambda cid, ch: {"frequency_hz_median": 1000 if ch == 8 else 2000,
+                                         "integrity": "INCOMPLETE"})
+    monkeypatch.setattr(service, "logic_session_close", lambda: {"success": True, "closed": False})
+    monkeypatch.setattr(service, "logic_stream_start", lambda **kw: {"operation_id": "stream-op"})
+    monkeypatch.setattr(service, "logic_stream_poll",
+                        lambda op: {"state": "finished", "response": {"result": {
+                            "reason": "COMPLETE", "cleanup_stop_ok": True,
+                            "stored_bytes": 1000, "artifact_directory": "captures/stream-id"}}})
+    result = service.logic_self_test(safety_confirmation=CONFIRM)
+    assert result.get("error_code") != "INTERMEDIATE_CLOSE_FAILED"
+    assert result["cleanup_ok"] is True
+    assert result["overall_health"] == "DIAGNOSTIC_PASS_UNCALIBRATED"
+
+
+def test_filter_type_error_is_filter_failed(monkeypatch, tmp_path):
+    source, _ = capture(monkeypatch, tmp_path)
+    metadata = json.loads((source / "meta.json").read_text())
+    metadata["sample_counts"]["1"] = ["not-an-int"]
+    (source / "meta.json").write_text(json.dumps(metadata))
+    result = service.logic_filter("original", 0, 3, out_name="derived")
+    assert result["success"] is False
+    assert result["error_code"] == "FILTER_FAILED"
+    assert not (tmp_path / "captures" / "derived").exists()
+
+
+def test_filter_publishes_meta_with_replace(monkeypatch, tmp_path):
+    import os
+    capture(monkeypatch, tmp_path)
+    calls = []
+    real_replace = os.replace
+
+    def spy(src, dst):
+        calls.append((os.fspath(src), os.fspath(dst)))
+        real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", spy)
+    result = service.logic_filter("original", 0, 3, out_name="derived")
+    assert result["success"] is True
+    assert calls
+    src, dst = calls[-1]
+    assert dst.endswith("meta.json")
+    assert src.endswith("meta.json.partial")
+    assert not (tmp_path / "captures" / "derived" / "meta.json.partial").exists()
+
+
+def test_unspecified_host_timeout_covers_long_trigger_wait(monkeypatch, tmp_path):
+    cli = tmp_path / "atk-dl16"
+    cli.write_text("mock")
+    monkeypatch.setenv("DL16_CLI_PATH", str(cli))
+    monkeypatch.delenv("DL16_BACKEND_MODE", raising=False)
+    seen = {}
+
+    class Result:
+        returncode = 1
+        stdout = ""
+        stderr = "no device"
+
+    def fake_run(cmd, **kwargs):
+        seen["timeout"] = kwargs.get("timeout")
+        seen["cmd"] = cmd
+        return Result()
+
+    monkeypatch.setattr(backend.subprocess, "run", fake_run)
+    result = backend.capture(CaptureRequest(channels=(0,), trigger="ch0:rising", duration_ms=20),
+                             trigger_timeout_sec=120)
+    assert result["error_code"] != "INVALID_CAPTURE_CONFIG"
+    assert seen["timeout"] > 120 + 0.02 + 5
+    assert "--trigger-timeout" in seen["cmd"]
+
+
+def test_logic_capture_omitted_timeout_is_not_forced_to_45(monkeypatch):
+    seen = {}
+
+    def fake_capture(request, timeout_s=45.0, *args, **kwargs):
+        seen["timeout_s"] = timeout_s
+        return {"success": False, "error_code": "STUB"}
+
+    monkeypatch.setattr(backend, "capture", fake_capture)
+    service.logic_capture(channels=[0], trigger="ch0:rising", trigger_timeout_sec=120)
+    assert seen["timeout_s"] is None

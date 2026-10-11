@@ -81,8 +81,12 @@ def decode_uart(wave: Waveform, *, baud_rate: int = 115200, data_bits: int = 8,
         stop_ok = bool(np.all(values[1 + data_bits + parity_bits:]))
         frames.append({"start_sample": int(start), "value": value,
                        "parity_ok": parity_ok, "stop_ok": stop_ok})
-        # The next byte can begin immediately after the stop bit(s).
-        next_frame_start = int(np.ceil(start + frame_bits * samples_per_bit - 1e-9))
+        # Only a frame with valid stop and parity consumes the timeline. A noise
+        # false start with a bad stop/parity must not hide a real byte inside
+        # that nominal window. The next valid byte may begin immediately after
+        # the stop bit(s).
+        if parity_ok and stop_ok:
+            next_frame_start = int(np.ceil(start + frame_bits * samples_per_bit - 1e-9))
         if len(frames) >= limit:
             break
     return frames

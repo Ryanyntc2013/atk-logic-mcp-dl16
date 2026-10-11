@@ -42,6 +42,23 @@ def test_uart_even_parity_and_mismatch():
     assert decode_uart(ok, baud_rate=100_000, parity="odd")[0]["parity_ok"] is False
 
 
+def test_uart_noise_glitch_does_not_swallow_following_byte():
+    # A one-bit false start whose stop sample lands inside a later real frame
+    # must not consume that frame. Only a valid stop/parity advances the cursor.
+    spb = 10
+    bits = [1] * 30
+    bits += [0] * spb                 # false start at sample 30
+    bits += [1] * 20                  # idle, real start falls at sample 60
+    bits += [0] * spb                 # real start
+    bits += [0] * (8 * spb)           # 0x00, LSB first
+    bits += [1] * spb                 # stop
+    bits += [1] * spb
+    frames = decode_uart(wf(0, bits), baud_rate=100_000)
+    valid = [frame["value"] for frame in frames if frame["parity_ok"] and frame["stop_ok"]]
+    assert valid == [0x00]
+    assert any(frame["stop_ok"] is False for frame in frames)
+
+
 def test_uart_inverted_and_two_stop_bits():
     w = wf(0, uart_bits(0x0F, 10, stop=2, invert=True))
     frames = decode_uart(w, baud_rate=100_000, stop_bits=2, invert=True)
