@@ -61,8 +61,11 @@ def _hash_manifest(directory: Path) -> None:
             if not file.is_file() or file == manifest:
                 continue
             relative = file.relative_to(directory).as_posix()
-            digest = hashlib.sha256(file.read_bytes()).hexdigest()
-            out.write(f"{digest}  {relative}\n")
+            sha = hashlib.sha256()
+            with file.open("rb") as stream:
+                for block in iter(lambda: stream.read(1024 * 1024), b""):
+                    sha.update(block)
+            out.write(f"{sha.hexdigest()}  {relative}\n")
 
 
 def _git_rev() -> str:
