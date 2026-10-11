@@ -1,3 +1,13 @@
+# Latest continuation — TASK-064, 2026-10-11
+
+HIL DONE. Delivered automated hardware diagnostic tool `logic_self_test(confirm_safe_wiring=True)`.
+Guarded with mandatory safety confirmation; automates USB status check, dual PWM start,
+high-speed 20MHz Buffer capture (verifying 1000Hz on CH8 and 2000Hz on CH14 with 0.0ns jitter),
+1MHz Stream capture (verifying dual-frequency recovery and 16-channel storage), and clean session teardown.
+Live verification confirmed `overall_health: "HEALTHY"`.
+Validation: **309 full passed**, compileall clean.
+Details: [tasks/DL16-TASK-064-mcp-self-test-tool.md](tasks/DL16-TASK-064-mcp-self-test-tool.md).
+
 # Latest continuation — TASK-063, 2026-10-11
 
 DONE. Integrated Stream capture directories (`stream_meta.json` + `ch{channel}.packed.bin`)

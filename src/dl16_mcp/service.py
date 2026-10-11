@@ -252,3 +252,99 @@ def logic_buffer_poll(operation_id: str) -> dict[str, Any]:
 
 def logic_buffer_cancel(operation_id: str) -> dict[str, Any]:
     return backend.buffer_control(operation_id, cancel=True)
+
+
+def logic_self_test(confirm_safe_wiring: bool = False) -> dict[str, Any]:
+    """Run automated hardware end-to-end self-test on loopback channels (CH8=PWM0, CH14=PWM1)."""
+    from pathlib import Path
+    import time
+    if not confirm_safe_wiring:
+        return {
+            "success": False,
+            "error_code": "SAFETY_CONFIRMATION_REQUIRED",
+            "message": "Self-test requires confirm_safe_wiring=True confirming CH8 connected to PWM0 and CH14 connected to PWM1 with GUI closed.",
+        }
+    try:
+        logic_session_close()
+        st = logic_status()
+        if not st.get("connected"):
+            return {"success": False, "error_code": "DEVICE_NOT_CONNECTED", "message": "DL16 device is not connected", "status": st}
+
+        p0 = logic_pwm(0, "configure", 1000, 50.0, confirm_safe_wiring=True)
+        p1 = logic_pwm(1, "configure", 2000, 50.0, confirm_safe_wiring=True)
+        if not p0.get("success") or not p1.get("success"):
+            return {"success": False, "error_code": "PWM_CONFIG_FAILED", "pwm0": p0, "pwm1": p1}
+
+        buf = logic_capture(channels=[8, 14], sample_rate_hz=20_000_000, duration_ms=20, threshold_voltage=1.6)
+        if not buf.get("success"):
+            return {"success": False, "error_code": "BUFFER_CAPTURE_FAILED", "buffer_capture": buf}
+        buf_cid = buf.get("capture_id")
+        buf_p8 = logic_measure_pwm(buf_cid, 8)
+        buf_p14 = logic_measure_pwm(buf_cid, 14)
+
+        logic_session_close()
+        p0 = logic_pwm(0, "configure", 1000, 50.0, confirm_safe_wiring=True)
+        p1 = logic_pwm(1, "configure", 2000, 50.0, confirm_safe_wiring=True)
+        if not p0.get("success") or not p1.get("success"):
+            return {"success": False, "error_code": "STREAM_PWM_CONFIG_FAILED", "pwm0": p0, "pwm1": p1}
+
+        str_start = logic_stream_start(
+            experimental_opt_in=True,
+            safety_confirmation="CONFIRMED_SAFE_WIRING_GUI_CLOSED",
+            channels=[8, 14],
+            sample_rate_hz=1_000_000,
+            duration_ms=100,
+            threshold_voltage=1.6,
+        )
+        op_id = str_start.get("operation_id")
+        if not op_id:
+            return {"success": False, "error_code": "STREAM_START_FAILED", "stream_start": str_start}
+
+        t0 = time.monotonic()
+        while True:
+            poll = logic_stream_poll(op_id)
+            if poll.get("state") == "finished":
+                break
+            time.sleep(0.02)
+            if time.monotonic() - t0 > 10:
+                return {"success": False, "error_code": "STREAM_TIMEOUT", "poll": poll}
+
+        str_res = poll.get("response", {}).get("result", {})
+        str_dir = str_res.get("artifact_directory", "")
+        str_cid = Path(str_dir).name
+        str_p8 = logic_measure_pwm(str_cid, 8)
+        str_p14 = logic_measure_pwm(str_cid, 14)
+
+        logic_session_close()
+
+        buf_ok = (990 <= buf_p8.get("frequency_hz_median", 0) <= 1010 and
+                  1980 <= buf_p14.get("frequency_hz_median", 0) <= 2020)
+        str_ok = (990 <= str_p8.get("frequency_hz_median", 0) <= 1010 and
+                  1980 <= str_p14.get("frequency_hz_median", 0) <= 2020)
+
+        all_ok = buf_ok and str_ok
+        return {
+            "success": all_ok,
+            "overall_health": "HEALTHY" if all_ok else "DEGRADED",
+            "device": st.get("details", {}).get("model", "DL16"),
+            "buffer_capture": {
+                "ok": buf_ok,
+                "capture_id": buf_cid,
+                "ch8_freq_hz": buf_p8.get("frequency_hz_median"),
+                "ch14_freq_hz": buf_p14.get("frequency_hz_median"),
+                "ch8_jitter_rms_ns": buf_p8.get("period_ns_jitter_rms"),
+                "ch14_jitter_rms_ns": buf_p14.get("period_ns_jitter_rms"),
+            },
+            "stream_capture": {
+                "ok": str_ok,
+                "capture_id": str_cid,
+                "stored_bytes": str_res.get("stored_bytes"),
+                "reads": str_res.get("reads"),
+                "ch8_freq_hz": str_p8.get("frequency_hz_median"),
+                "ch14_freq_hz": str_p14.get("frequency_hz_median"),
+            },
+        }
+    except Exception as exc:
+        logic_session_close()
+        return {"success": False, "error_code": "SELF_TEST_EXCEPTION", "message": str(exc)}
+

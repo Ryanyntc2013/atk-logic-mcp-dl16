@@ -171,6 +171,12 @@ def logic_decode(capture_id: str, protocol: str, channels: list[int],
                                 bit_order, bits_per_word)
 
 
+@mcp.tool()
+def logic_self_test(confirm_safe_wiring: bool = False) -> dict:
+    """Run automated hardware end-to-end self-test on loopback channels (CH8=PWM0, CH14=PWM1)."""
+    return service.logic_self_test(confirm_safe_wiring=confirm_safe_wiring)
+
+
 def main() -> None:
     mcp.run(transport="stdio")
 

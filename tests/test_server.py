@@ -14,6 +14,7 @@ EXPECTED_TOOLS = {
     "logic_filter",
     "logic_search",
     "logic_decode",
+    "logic_self_test",
 }
 
 
@@ -29,3 +30,10 @@ def test_no_raw_or_firmware_tools_exposed():
     names = {tool.name.lower() for tool in tools}
     forbidden = {"send_raw", "flash", "firmware", "bootloader", "write_raw", "pwm"}
     assert names.isdisjoint(forbidden)
+
+
+def test_self_test_requires_safety_confirmation():
+    res = server.logic_self_test(confirm_safe_wiring=False)
+    assert res["success"] is False
+    assert res["error_code"] == "SAFETY_CONFIRMATION_REQUIRED"
+
