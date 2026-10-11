@@ -104,38 +104,53 @@ StreamObservation run_stream(const CaptureConfig& cfg, const std::string& direct
             else {
                 if(!send(build_simple_trigger_frame(cfg),50)) throw std::runtime_error("trigger write failed");
                 const auto end=std::chrono::steady_clock::now()+std::chrono::milliseconds(cfg.duration_ms);
-                RxParser parser; std::array<uint8_t,16384> input{},linear{};
+                RxParser parser; std::array<uint8_t,16384> input{};
+                std::vector<uint8_t> linear, raw_carry;
                 while(!cancel.load()) {
                     auto remaining=std::chrono::duration_cast<std::chrono::milliseconds>(end-std::chrono::steady_clock::now()).count();
                     if(remaining<=0) break;
                     const auto receive_start=std::chrono::steady_clock::now();
                     size_t n=0; auto status=read(input.data(),input.size(),n,static_cast<int>(std::min<int64_t>(remaining,10)));
                     result.receive_elapsed_ns+=static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now()-receive_start).count());
-                    ++result.reads; publish();
                     if(n>input.size()) throw std::runtime_error("invalid RX size");
-                    if(!raw.append(input.data(),n,status.code)) throw std::runtime_error("raw RX record failed");
-                    publish();
-                    size_t aligned=n/2048*2048; result.short_bytes+=n-aligned;
-                    if(n!=aligned) {result.reason="SHORT_RX";break;}
-                    if(aligned) {
-                        convert_to_pc(input.data(),linear.data(),aligned); parser.push_bytes(linear.data(),aligned);
-                        while(auto m=parser.pop_message()) {
-                            if(m->type==RxMessageType::ChannelData) {
-                                auto p=RxParser::parse_channel_data(*m,false);
-                                if(!p || p->channel_id>=16) throw std::runtime_error("invalid channel");
-                                writer.append(p->channel_id,p->data.data(),p->data.size());
-                                publish();
-                            } else if(m->type==RxMessageType::TriggerOffset) {
-                                if(m->payload.size()>256) throw std::runtime_error("order3 exceeds diagnostic bound");
-                                static const char* digits="0123456789abcdef"; result.order3_hex.clear();
-                                for(auto b:m->payload){result.order3_hex+=digits[b>>4];result.order3_hex+=digits[b&15];}
-                            } else if(m->type==RxMessageType::Ack) {auto p=RxParser::parse_ack(*m);if(p)result.ack=result.ack||(p->command_code==0x12&&p->status==3);}
-                            else if(m->type==RxMessageType::Complete) ++result.order6;
+                    if(n>0 || !status) {
+                        ++result.reads; publish();
+                        if(!raw.append(input.data(),n,status.code)) throw std::runtime_error("raw RX record failed");
+                        publish();
+                    }
+                    if(!status){
+                        if(n>0) raw_carry.insert(raw_carry.end(),input.data(),input.data()+n);
+                        if(!raw_carry.empty()) {result.short_bytes+=raw_carry.size();result.reason="SHORT_RX";}
+                        else result.reason="USB_ERROR";
+                        break;
+                    }
+                    if(n>0) {
+                        raw_carry.insert(raw_carry.end(),input.data(),input.data()+n);
+                        size_t aligned=raw_carry.size()/2048*2048;
+                        if(aligned>0) {
+                            if(linear.size()<aligned) linear.resize(aligned);
+                            convert_to_pc(raw_carry.data(),linear.data(),aligned);
+                            parser.push_bytes(linear.data(),aligned);
+                            raw_carry.erase(raw_carry.begin(),raw_carry.begin()+aligned);
+                            while(auto m=parser.pop_message()) {
+                                if(m->type==RxMessageType::ChannelData) {
+                                    auto p=RxParser::parse_channel_data(*m,false);
+                                    if(!p || p->channel_id>=16) throw std::runtime_error("invalid channel");
+                                    writer.append(p->channel_id,p->data.data(),p->data.size());
+                                    publish();
+                                } else if(m->type==RxMessageType::TriggerOffset) {
+                                    if(m->payload.size()>256) throw std::runtime_error("order3 exceeds diagnostic bound");
+                                    static const char* digits="0123456789abcdef"; result.order3_hex.clear();
+                                    for(auto b:m->payload){result.order3_hex+=digits[b>>4];result.order3_hex+=digits[b&15];}
+                                } else if(m->type==RxMessageType::Ack) {auto p=RxParser::parse_ack(*m);if(p)result.ack=result.ack||(p->command_code==0x12&&p->status==3);}
+                                else if(m->type==RxMessageType::Complete) ++result.order6;
+                            }
                         }
                     }
-                    if(!status){result.reason="USB_ERROR";break;}
                     if(result.order6){result.reason="ORDER6_OBSERVED";break;}
                 }
+                result.short_bytes+=raw_carry.size();
+                if(writer.total_bytes()==0 && !raw_carry.empty() && result.reason=="DEADLINE") result.reason="SHORT_RX";
                 if(cancel.load() && result.reason=="DEADLINE")result.reason="CANCELLED";
             }
         }

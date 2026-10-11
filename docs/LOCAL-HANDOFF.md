@@ -1,3 +1,20 @@
+# Latest continuation — TASK-060, 2026-10-11
+
+HIL DONE. Implemented multi-read carry-over buffering in `scripts/experimental_stream.h`.
+Partial reads (< 2048 bytes) across USB bulk timeouts accumulate in `raw_carry`
+and only whole 2048-byte banks are passed to `convert_to_pc` and `RxParser`.
+Validated offline: 21 targeted tests in `test_experimental_stream.py` including
+`test_stream_carry_over_fragmented_512` (synthesizing 512-byte USB read fragments);
+full pytest **307 passed in 12.33s**.
+Physical HIL execution: ran ONE bounded 1MHz/1000ms capture on CH8/CH14 (PWM 1kHz/2kHz)
+with `raw_rx_logging=True`. Captured 152 USB bulk reads without aborting.
+Stream completed full 1000ms duration cleanly (`reason: DEADLINE`, `stored_bytes: 1983232`,
+123,952 bytes per channel across all 16 channels, `short_bytes: 0`).
+`rx.bin` analysis revealed 8 separate reads that ended on 512-byte boundaries
+(Records 50, 60, 119, 121, 124, 132, 147, 149), all seamlessly accumulated across reads.
+Evidence retained in `artifacts/hil/DL16-TASK-060/` (`result.json`, `records.json`, `native-hash.txt`).
+Details: [tasks/DL16-TASK-060-stream-carryover-buffering.md](tasks/DL16-TASK-060-stream-carryover-buffering.md).
+
 # Latest continuation — TASK-059, 2026-10-11
 
 HIL DONE. Ran ONE bounded 1MHz/1000ms Stream capture with `raw_rx_logging=True`.

@@ -29,8 +29,21 @@ int main(int argc,char** argv) {
                         if(pc[9]==0x11 && pc[11]!=0)throw std::runtime_error("not Stream");return true;},
                     [&](uint8_t* data,size_t,size_t& n,int){
                         if(mode=="usb_error"){n=0;return Error{ErrorCode::UsbTransferError,"synthetic error"};}
-                        if(mode=="short" || mode=="error_bytes"){n=1024;for(size_t i=0;i<n;++i)data[i]=static_cast<uint8_t>(i);return Error{mode=="short"?ErrorCode::Ok:ErrorCode::DeviceDisconnected,"synthetic"};}
+                        if(mode=="short" || mode=="error_bytes"){
+                            if(count++==0){n=1024;for(size_t i=0;i<n;++i)data[i]=static_cast<uint8_t>(i);return Error{mode=="short"?ErrorCode::Ok:ErrorCode::DeviceDisconnected,"synthetic"};}
+                            n=0;return Error::ok();
+                        }
                         std::vector<uint8_t> pc(2048,0);
+                        if(mode=="fragmented_512") {
+                            size_t bank_idx=count/4; size_t part=count%4;
+                            unsigned ch=static_cast<unsigned>(bank_idx%16);
+                            std::vector<uint8_t> packet{0x0a,1,6,0,static_cast<uint8_t>(ch),0,0x81,0xaa,0xaa,0xaa,0,0x0b};
+                            std::copy(packet.begin(),packet.end(),pc.begin());
+                            std::vector<uint8_t> dev_bank(2048);convert_to_device(pc.data(),dev_bank.data(),pc.size());
+                            std::copy(dev_bank.begin()+part*512,dev_bank.begin()+(part+1)*512,data);
+                            n=512; ++count;
+                            std::this_thread::sleep_for(std::chrono::milliseconds(1));return Error::ok();
+                        }
                         // Actual RX parser packet: all16 source channel, retain AA data as ordinary samples.
                         if(mode=="metadata_error" && count==1) {
                             std::filesystem::remove(std::filesystem::path(argv[1])/"stream_meta.json");

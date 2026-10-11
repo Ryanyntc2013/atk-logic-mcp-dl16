@@ -258,3 +258,40 @@ def test_stream_raw_combined_budget_prelaunch(monkeypatch):
     assert backend.stream_start(experimental_opt_in=True, safety_confirmation=CONFIRM,
                                 channels=[8, 14], sample_rate_hz=20_000_000, duration_ms=4500,
                                 raw_rx_logging=True)["error_code"] == "INVALID_STREAM"
+
+
+@pytest.mark.skipif(not HARNESS.exists(), reason="native Stream integration harness not built")
+def test_stream_carry_over_fragmented_512(tmp_path):
+    directory = tmp_path / "frag512"
+    proc = subprocess.Popen([str(HARNESS), str(directory), "fragmented_512"], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, text=True)
+    def request(command, **fields):
+        proc.stdin.write(json.dumps({"request_id": command, "command": command, **fields}) + "\n")
+        proc.stdin.flush()
+        return json.loads(proc.stdout.readline())
+    try:
+        assert request("stream_start", channels=[8, 14], sample_rate_hz=1_000_000,
+                       duration_ms=100, threshold_voltage=1.6, output_dir=str(directory),
+                       experimental_opt_in=True, safety_confirmation=CONFIRM)["ok"]
+        deadline = time.monotonic() + 3
+        while True:
+            reply = request("stream_poll", operation_id="stream_start")
+            if reply["state"] == "finished":
+                break
+            assert time.monotonic() < deadline
+            time.sleep(0.005)
+        result = reply["response"]["result"]
+        assert result["success"] is False
+        assert result["reason"] in ("DEADLINE", "ORDER6_OBSERVED")
+        assert result["stored_bytes"] > 0
+        assert reply["progress"]["reads"] >= 4
+        assert request("close")["ok"]
+        assert proc.wait(timeout=3) == 0
+    finally:
+        if proc.poll() is None:
+            proc.stdin.close()
+            proc.wait(timeout=3)
+        proc.stdout.close()
+        if not proc.stdin.closed:
+            proc.stdin.close()
+
