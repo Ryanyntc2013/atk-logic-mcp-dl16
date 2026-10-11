@@ -13,8 +13,14 @@ but lacked both required capture-stop cleanup fields. Acceptance FAILED; block
 stopped immediately with no replay/second capture. Close returned, not physical
 stop certification. See task reports and ignored artifacts/hil/DL16-TASK-044.
 
-Next gate: reconcile reproducible native build/response cleanup evidence before
-further hardware blocks. Do not weaken acceptance or label this run HIL_PASS.
+TASK-045 reconciled this gate: current ignored serializer source lacked the tracked
+stop-observation fields. The full bootstrap rebuilt the patch stack; native suite
+34/34 passed (including device-open hardware probe), followed by **2/2** bounded
+captures passing PASS_WAVEFORM_UNCALIBRATED with capture-stop fields and waveform
+criteria. Close returned. Evidence artifacts/hil/DL16-TASK-045; TASK-044 remains
+FAILED and unchanged. No calibrated timing, stream/RLE or unplug claim.
+Next: complete the pending offline raw-RX/RLE drafts and independently gate live
+Stream/cancel; do not infer broad hardware reliability from two captures.
 Raw-RX/RLE drafts remain unfinished and separate; live Stream is not delivered.
 
 # Validation environment correction — DL16-TASK-042, 2026-10-11
