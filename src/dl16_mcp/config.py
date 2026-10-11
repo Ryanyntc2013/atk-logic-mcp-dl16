@@ -77,10 +77,15 @@ class CaptureRequest:
             tokens = [token.strip() for token in self.trigger.split(",") if token.strip()]
             if not tokens:
                 raise ValueError("Trigger must be 'immediate' or chN:edge[,chM:edge...]")
+            seen_trigger_channels: set[int] = set()
             for token in tokens:
                 match = re.fullmatch(r"ch(1[0-5]|[0-9]):(rising|falling|high|low|both|double)", token)
                 if not match or int(match.group(1)) not in self.channels:
                     raise ValueError("Each trigger must be chN:rising/falling/high/low/both for an enabled channel")
+                ch = int(match.group(1))
+                if ch in seen_trigger_channels:
+                    raise ValueError(f"Duplicate trigger condition for channel {ch}")
+                seen_trigger_channels.add(ch)
         # Conservative generic device-agnostic bound; model-specific limits remain native backend's job.
         if self.sample_rate_hz * self.duration_ms // 1000 > 1_000_000_000:
             raise ValueError("Requested capture exceeds scaffold safety cap (1G samples/channel)")
