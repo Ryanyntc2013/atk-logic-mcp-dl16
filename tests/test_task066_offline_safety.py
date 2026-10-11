@@ -255,3 +255,10 @@ def test_filter_rejects_unaligned_peer_channel_without_writing(monkeypatch, tmp_
     result = service.logic_filter("original", 0, 3, out_name="derived")
     assert result["success"] is False
     assert not (tmp_path / "captures" / "derived").exists()
+
+
+def test_uart_rejects_undersampled_baud():
+    from dl16_mcp.analysis import AnalysisError
+    wave = Waveform(0, b"\x00\xff", 16, 1_000_000, "UNVERIFIED", "SYNTHETIC", {})
+    with pytest.raises(AnalysisError, match="two samples per bit"):
+        decode_uart(wave, baud_rate=750_000)
