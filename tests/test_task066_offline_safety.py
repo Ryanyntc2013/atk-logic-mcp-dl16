@@ -272,6 +272,57 @@ def test_uart_rejects_undersampled_baud():
         decode_uart(wave, baud_rate=750_000)
 
 
+def test_selftest_real_claim_is_clear_after_success_and_exception(monkeypatch):
+    monkeypatch.setenv("DL16_BACKEND_MODE", "session")
+    previous = (backend._SESSION, backend._SESSION_PATH, list(backend._RETIRING), backend._SELF_TEST_CLAIMED)
+    backend._SESSION = None
+    backend._SESSION_PATH = None
+    backend._RETIRING.clear()
+    backend._SELF_TEST_CLAIMED = False
+    backend._self_test_claim.held = False
+    try:
+        seen = {}
+
+        def status():
+            seen["busy_during_success"] = backend.device_busy()
+            return {"connected": True, "ready": True, "details": {"model": "DL16 Plus"}}
+
+        monkeypatch.setattr(service, "logic_status", status)
+        monkeypatch.setattr(service, "logic_pwm", lambda *a, **kw: {"success": True})
+        monkeypatch.setattr(service, "logic_capture",
+                            lambda **kw: {"success": True, "capture_id": "buffer-id"})
+        monkeypatch.setattr(service, "logic_measure_pwm",
+                            lambda cid, ch: {"frequency_hz_median": 1000 if ch == 8 else 2000,
+                                             "integrity": "INCOMPLETE"})
+        monkeypatch.setattr(service, "logic_stream_start", lambda **kw: {"operation_id": "stream-op"})
+        monkeypatch.setattr(service, "logic_stream_poll",
+                            lambda op: {"state": "finished", "response": {"result": {
+                                "reason": "DEADLINE", "cleanup_stop_ok": True,
+                                "stored_bytes": 32000, "artifact_directory": "captures/stream-id"}}})
+        result = service.logic_self_test(safety_confirmation=CONFIRM)
+        assert result["success"] is True
+        assert result["overall_health"] == "DIAGNOSTIC_PASS_UNCALIBRATED"
+        assert seen["busy_during_success"] is True
+        assert backend.device_busy() is False
+
+        def explode():
+            seen["busy_during_exception"] = backend.device_busy()
+            raise RuntimeError("simulated diagnostic failure")
+
+        monkeypatch.setattr(service, "logic_status", explode)
+        failed = service.logic_self_test(safety_confirmation=CONFIRM)
+        assert failed["error_code"] == "SELF_TEST_EXCEPTION"
+        assert seen["busy_during_exception"] is True
+        assert backend.device_busy() is False
+    finally:
+        backend._self_test_claim.held = True
+        backend.release_self_test_claim()
+        backend._SESSION, backend._SESSION_PATH = previous[0], previous[1]
+        backend._RETIRING[:] = previous[2]
+        backend._SELF_TEST_CLAIMED = previous[3]
+        backend._self_test_claim.held = False
+
+
 def test_selftest_refuses_oneshot_without_touching_outputs(monkeypatch):
     monkeypatch.delenv("DL16_BACKEND_MODE", raising=False)
     monkeypatch.setattr(backend, "claim_for_self_test", lambda: pytest.fail("claimed"))

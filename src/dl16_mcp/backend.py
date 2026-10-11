@@ -123,11 +123,17 @@ def claim_for_self_test() -> bool:
 
 
 def release_self_test_claim() -> None:
-    """Drop the self-test reservation. Safe to call when this thread holds none."""
+    """Drop this thread's self-test reservation.
+
+    A caller that does not hold the claim leaves it in place, so another
+    thread cannot clear a self-test that is still running.
+    """
     global _SELF_TEST_CLAIMED
     with _SESSION_LOCK:
+        if not getattr(_self_test_claim, "held", False):
+            return
         _SELF_TEST_CLAIMED = False
-    _self_test_claim.held = False
+        _self_test_claim.held = False
 
 
 def _track_retiring(session: NativeSession) -> None:
@@ -451,6 +457,9 @@ def pwm(output: int, action: str = "configure", frequency_hz: int = 1000,
 def close_session() -> dict[str, Any]:
     global _SESSION, _SESSION_PATH
     with _SESSION_LOCK:
+        if _SELF_TEST_CLAIMED and not getattr(_self_test_claim, "held", False):
+            return {"success": False, "closed": False, "error_code": "DEVICE_BUSY",
+                    "message": "self-test holds the device"}
         session, _SESSION = _SESSION, None
         _SESSION_PATH = None
         still_busy = any(item is not session and _owner_still_busy(item) for item in _RETIRING)

@@ -39,7 +39,9 @@ def decode_uart(wave: Waveform, *, baud_rate: int = 115200, data_bits: int = 8,
     Idle is high (low when ``invert``). Each frame is sampled at bit centers.
     A valid stop bit consumes the frame even when parity fails. A failed stop
     is not returned and does not use the result limit; the search resumes one
-    bit later, and only after a full bit of idle-high.
+    bit later. A start must leave idle-high, but only about half a bit is
+    required, and never more than one quantized bit, so a short stop still
+    qualifies before the next byte.
     """
     if baud_rate <= 0:
         raise AnalysisError("baud_rate must be positive")
@@ -61,15 +63,22 @@ def decode_uart(wave: Waveform, *, baud_rate: int = 115200, data_bits: int = 8,
     parity_bits = 0 if parity == "none" else 1
     frame_bits = 1 + data_bits + parity_bits + stop_bits
     bit_width = max(1, int(np.ceil(samples_per_bit)))
+    # ceil(samples_per_bit) is wider than a stop bit that quantizes to
+    # floor(samples_per_bit) samples. Half a bit shows the line was idle, and
+    # the check never asks for more highs than one whole quantized bit.
+    idle_need = min(
+        max(1, int(np.floor(samples_per_bit))),
+        max(1, int(np.floor(samples_per_bit / 2.0))),
+    )
     falling = np.flatnonzero(line[:-1] & ~line[1:]) + 1
     frames: list[dict[str, Any]] = []
     next_frame_start = 0
     for start in falling:
         if start < next_frame_start:
             continue  # An edge inside the preceding frame is a data bit, not a new start.
-        # A start bit is a fall out of idle. Require a full bit of high first so
-        # a data toggle is not retried as a new byte.
-        if start < bit_width or not bool(np.all(line[start - bit_width:start])):
+        # A start bit is a fall out of idle. A full ceil(bit) of highs rejects
+        # back-to-back ASCII, whose stop bit is only ~samples_per_bit wide.
+        if start < idle_need or not bool(np.all(line[start - idle_need:start])):
             continue
         centers = np.round(start + (np.arange(frame_bits) + 0.5) * samples_per_bit).astype(int)
         if centers[-1] >= n:
@@ -93,7 +102,9 @@ def decode_uart(wave: Waveform, *, baud_rate: int = 115200, data_bits: int = 8,
             # may begin immediately after the stop bit(s).
             frames.append({"start_sample": int(start), "value": value,
                            "parity_ok": parity_ok, "stop_ok": True})
-            next_frame_start = int(np.ceil(start + frame_bits * samples_per_bit - 1e-9))
+            # Floor keeps a following start that lands on the stop boundary.
+            # Data edges sit at least a stop bit earlier, so they stay inside.
+            next_frame_start = int(np.floor(start + frame_bits * samples_per_bit))
             if len(frames) >= limit:
                 break
         else:

@@ -72,6 +72,33 @@ def test_uart_parity_error_does_not_invent_extra_bytes():
     assert [(frame["value"], frame["parity_ok"]) for frame in limited] == [(0x55, False)]
 
 
+def test_uart_noninteger_ratio_keeps_back_to_back_ascii():
+    # 1 MHz / 115200 is ~8.68 samples/bit. ASCII MSB is 0, so the only highs
+    # before the next start are the stop bit (often 8 samples, below ceil).
+    text = "HELLO WORLD"
+    sample_rate = 1_000_000
+    baud = 115200
+    spb = sample_rate / baud
+    lead_bits = 2.0
+    n = int((lead_bits + 10 * len(text) + 3) * spb) + 5
+    line = np.ones(n, dtype=np.uint8)
+    for i in range(n):
+        t_bit = (i + 0.5) / sample_rate * baud - lead_bits
+        if t_bit < 0:
+            continue
+        char_i = int(t_bit // 10)
+        if char_i >= len(text):
+            continue
+        bit_pos = int(t_bit - char_i * 10)
+        if bit_pos == 0:
+            line[i] = 0
+        elif 1 <= bit_pos <= 8:
+            line[i] = (ord(text[char_i]) >> (bit_pos - 1)) & 1
+    frames = decode_uart(wf(0, line.tolist(), rate=sample_rate), baud_rate=baud)
+    assert "".join(chr(frame["value"]) for frame in frames) == text
+    assert all(frame["parity_ok"] and frame["stop_ok"] for frame in frames)
+
+
 def test_uart_inverted_and_two_stop_bits():
     w = wf(0, uart_bits(0x0F, 10, stop=2, invert=True))
     frames = decode_uart(w, baud_rate=100_000, stop_bits=2, invert=True)

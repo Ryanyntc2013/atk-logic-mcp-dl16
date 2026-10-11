@@ -350,7 +350,8 @@ def test_self_test_claim_excludes_other_owners():
     backend._SESSION = None
     backend._SESSION_PATH = None
     backend._RETIRING.clear()
-    backend.release_self_test_claim()
+    backend._SELF_TEST_CLAIMED = False
+    backend._self_test_claim.held = False
     try:
         barrier = threading.Barrier(2)
         results = []
@@ -371,10 +372,63 @@ def test_self_test_claim_excludes_other_owners():
             backend._get_session(Path("unused-cli"))
         assert caught.value.code == "DEVICE_BUSY"
     finally:
+        backend._self_test_claim.held = False
+        backend._SESSION, backend._SESSION_PATH = previous[0], previous[1]
+        backend._RETIRING[:] = previous[2]
+        backend._SELF_TEST_CLAIMED = previous[3]
+
+
+def test_close_session_blocks_thread_that_does_not_hold_self_test():
+    previous = (backend._SESSION, backend._SESSION_PATH, list(backend._RETIRING), backend._SELF_TEST_CLAIMED)
+    backend._SESSION = None
+    backend._SESSION_PATH = None
+    backend._RETIRING.clear()
+    backend._SELF_TEST_CLAIMED = False
+    backend._self_test_claim.held = False
+
+    class Owner:
+        def __init__(self):
+            self.is_closed = False
+            self.closed_calls = 0
+
+        def has_active_operation(self):
+            return False
+
+        def close(self):
+            self.closed_calls += 1
+            self.is_closed = True
+
+    owner = Owner()
+    try:
+        assert backend.claim_for_self_test() is True
+        backend._SESSION = owner
+        refused = []
+
+        def other():
+            refused.append(backend.close_session())
+            backend.release_self_test_claim()
+
+        thread = threading.Thread(target=other)
+        thread.start()
+        thread.join(timeout=3)
+        assert refused == [{"success": False, "closed": False, "error_code": "DEVICE_BUSY",
+                            "message": "self-test holds the device"}]
+        assert owner.closed_calls == 0
+        assert backend._SESSION is owner
+        assert backend.device_busy() is True
+        closed = backend.close_session()
+        assert closed["success"] is True
+        assert closed["closed"] is True
+        assert owner.closed_calls == 1
+        backend.release_self_test_claim()
+        assert backend.device_busy() is False
+    finally:
+        backend._self_test_claim.held = True
         backend.release_self_test_claim()
         backend._SESSION, backend._SESSION_PATH = previous[0], previous[1]
         backend._RETIRING[:] = previous[2]
         backend._SELF_TEST_CLAIMED = previous[3]
+        backend._self_test_claim.held = False
 
 
 def test_unvalidated_rle_is_not_silently_ignored(monkeypatch):
