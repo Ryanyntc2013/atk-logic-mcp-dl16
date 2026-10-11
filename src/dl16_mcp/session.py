@@ -94,6 +94,9 @@ class NativeSession:
                 raise SessionFailure("SESSION_START_FAILED", "native session pipes were not created")
             threading.Thread(target=self._read_stdout, name="dl16-session-stdout", daemon=True).start()
             hello = self._request_locked({"command": "hello", "protocol": 1}, timeout_s=5.0)
+            protocol = hello.get("protocol")
+            if type(protocol) is not int or protocol != 1:
+                raise SessionFailure("SESSION_PROTOCOL_ERROR", "native hello must advertise protocol 1")
             commands = hello.get("commands", [])
             self.capabilities = {c for c in commands if isinstance(c, str)} if isinstance(commands, list) else set()
             self._hello = True

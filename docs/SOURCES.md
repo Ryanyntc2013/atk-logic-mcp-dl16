@@ -50,6 +50,10 @@ Operator requested an independently implemented experiment based on documented L
 
 Native session PWM payloads are independently derived from this repository's reviewed TASK-004 helper and versioned PWM vectors. No new LHX code copied. The depth-stop lifecycle remains a behavioral experiment, not an exact LHX port. Dual known waveforms passed locally when configured in one Device ownership interval; timeout reuse failed and is now handled by closing the failed owner before a later explicit request. See [TASK-032](tasks/DL16-TASK-032-single-owner-long-session.md). Host stop-transfer success is not firmware acknowledgement or waveform generation authenticity.
 
+## Offline session reliability contracts (DL16-TASK-043)
+
+Strict protocol-1 hello validation and scripted worker reliability regressions are independently implemented from this repository's host-side JSONL ownership contract, without copying or translating third-party code. These tests cover capability isolation, timeout cleanup, explicit fresh owners and stale request rejection; they do not prove physical acquisition generation ownership. See [TASK-043](tasks/DL16-TASK-043-session-reliability.md). Evidence is CONTRACT_MOCK / OFFLINE, not HIL.
+
 ## License hygiene
 
 - Keep provenance, git commit IDs and third-party NOTICE when embedding source in the future.

@@ -1,3 +1,22 @@
+# Latest continuation — TASK-043/044, 2026-10-11
+
+User authorized uninstall of the old MCP and continuation. System Python's
+`dl16-mcp 1.0.0` editable package was removed (source/shared dependencies retained).
+The VS Code user `dl16-mcp` command now points to this checkout's venv Python;
+already-loaded MCP tools are not automatically refreshed and were not used.
+
+TASK-043 added 11 offline owner/mixed-worker regressions and strict protocol-1
+hello validation. Full venv suite: **183 passed, 1 skipped**; compileall passed.
+TASK-044 ran the repository native CLI only, matching retained TASK-034 SHA256.
+The first capture had exact CH8/CH14, full sample counts and valid 1kHz/2kHz PWM,
+but lacked both required capture-stop cleanup fields. Acceptance FAILED; block
+stopped immediately with no replay/second capture. Close returned, not physical
+stop certification. See task reports and ignored artifacts/hil/DL16-TASK-044.
+
+Next gate: reconcile reproducible native build/response cleanup evidence before
+further hardware blocks. Do not weaken acceptance or label this run HIL_PASS.
+Raw-RX/RLE drafts remain unfinished and separate; live Stream is not delivered.
+
 # Validation environment correction — DL16-TASK-042, 2026-10-11
 
 The system Python 3.14 has an unrelated editable `dl16-mcp` installation pointing
