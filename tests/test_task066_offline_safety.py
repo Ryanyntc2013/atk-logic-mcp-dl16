@@ -229,3 +229,29 @@ def test_selftest_normal_fixture_is_uncalibrated_not_healthy(monkeypatch):
     assert result["calibrated_timing_verified"] is False
     assert result["cleanup_ok"] is True
     assert (0, "stop") in stops and (1, "stop") in stops
+
+
+def test_filter_preserves_other_aligned_channels(monkeypatch, tmp_path):
+    source, _ = capture(monkeypatch, tmp_path)
+    peer = b"\x55\xaa"
+    (source / "ch01.bits").write_bytes(peer)
+    original_meta = json.loads((source / "meta.json").read_text())
+    original_meta["sample_counts"]["1"] = 16
+    (source / "meta.json").write_text(json.dumps(original_meta))
+    result = service.logic_filter("original", 0, 3, out_name="multichannel-derived")
+    assert result["success"] is True
+    dest = tmp_path / "captures" / "multichannel-derived"
+    assert (dest / "ch01.bits").read_bytes() == peer
+    assert load_capture("multichannel-derived", 1).samples == 16
+    assert json.loads((dest / "meta.json").read_text())["preserved_channels"] == [0, 1]
+
+
+def test_filter_rejects_unaligned_peer_channel_without_writing(monkeypatch, tmp_path):
+    source, _ = capture(monkeypatch, tmp_path)
+    (source / "ch01.bits").write_bytes(b"\x00")
+    metadata = json.loads((source / "meta.json").read_text())
+    metadata["sample_counts"]["1"] = 16
+    (source / "meta.json").write_text(json.dumps(metadata))
+    result = service.logic_filter("original", 0, 3, out_name="derived")
+    assert result["success"] is False
+    assert not (tmp_path / "captures" / "derived").exists()
