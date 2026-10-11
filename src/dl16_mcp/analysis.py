@@ -295,7 +295,8 @@ def glitch_filter(raw: bytes, sample_count: int, *, min_pulse_samples: int,
     start = 0
     stable_level: int | None = None
     removed = 0
-    for end in [*transitions, sample_count]:
+    from itertools import chain
+    for end in chain(transitions, (sample_count,)):
         end = int(end)
         if end - start >= min_pulse_samples:
             stable_level = level
