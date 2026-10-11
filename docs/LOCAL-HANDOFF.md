@@ -1,3 +1,28 @@
+# Validation environment correction — DL16-TASK-042, 2026-10-11
+
+The system Python 3.14 has an unrelated editable `dl16-mcp` installation pointing
+at `D:\code\autoLaD16`. The current VS Code user MCP launch entry uses that system
+Python with `-m dl16_mcp.server`; it must not be treated as this repository's MCP.
+Do not use the already-loaded `dl16-mcp-*` tools as repository HIL evidence.
+No global MCP configuration or installation was changed by TASK-042.
+
+Use `.venv\Scripts\python.exe` explicitly for repository commands. Pytest now puts
+`src` and `tests` first on its import path, and an import-provenance regression
+asserts that the application and protocol helper originate in this checkout.
+This isolation applies to pytest only, not arbitrary system Python commands or
+already-running MCP servers. The unfinished raw-RX test's helper imports were
+also corrected to avoid an unrelated installed `tests` package.
+
+Validation: `python -m pytest -q` and `.venv\Scripts\python.exe -m pytest -q`
+each returned **172 passed, 1 skipped**; `.venv\Scripts\python.exe -m compileall -q src`
+passed. The native replay executable remains unavailable/skipped. HIL_NOT_RUN:
+this correction performed no capture, PWM, reset or firmware operation.
+
+Next: finish the existing raw-RX/RLE drafts and session reliability gates using
+this repository's explicit Python/native executable paths. Preserve historical
+HIL evidence separately; neither old-MCP enumeration nor these offline tests
+establish a new repository hardware acceptance result.
+
 # Current resume ? 2026-10-11, after TASK-034
 
 Latest implementation before TASK-033/034 delivery: 3f7a8f2 (TASK-032). Current changes add public guarded logic_pwm and logic_session_close, CLI parity, PWM hello capability guard and real MCP stdio acceptance. 155 Python tests passed; current patched binary and raw evidence retained under ignored artifacts/hil/DL16-TASK-032/evidence and TASK-034.
