@@ -1,3 +1,16 @@
+# Latest continuation ? TASK-048, 2026-10-11
+
+TASK-048 adds explicit `--format raw-banks|dl16-raw-rx-v1` to the actual native
+replay target; default raw-banks behavior is retained. Framed replay is capped at
+32MiB, preserves read boundaries, reports native status errors/per-record tails
+and malformed records, and never promotes completeness. Actual executable tests
+cover synthetic boundaries, shorts, errors and truncations. Parent-provided
+TASK-047 physical archive was replayed OFFLINE only: 50 records, 819200 aligned
+bytes, no errors/tails/malformed records, 400 parsed messages and 414382 desyncs;
+orders 1:208, 2:76, 3:1, 4:1, 5:113, 6:1. ACK, offset and Complete marker parsed,
+but integrity/completeness remain UNKNOWN and no crop-aligned equivalence is
+claimed. No hardware, old MCP or Stream work. See `tasks/DL16-TASK-048-offline-raw-rx-replay.md`.
+
 # Latest continuation — TASK-047, 2026-10-11
 
 TASK-047 delivered tracked native opt-in raw-RX logging before bank conversion,

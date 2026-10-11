@@ -12,13 +12,18 @@
 
 constexpr size_t MAX_RAW_BYTES = 32 * 1024 * 1024;
 constexpr size_t MAX_FRAGMENT_BYTES = 65536;
+constexpr char RAW_RX_MAGIC[] = "DL16RX01";
+
+enum class InputFormat { RawBanks, RawRxV1 };
+static uint32_t read_le32(const uint8_t* b) { return uint32_t(b[0]) | (uint32_t(b[1]) << 8) | (uint32_t(b[2]) << 16) | (uint32_t(b[3]) << 24); }
 
 using namespace atkdl16;
 
 static void print_usage(const char* prog) {
-    std::cerr << "Usage: " << prog << " [--raw <raw.bin>] [--frag-size <N>] [--json]\n"
+    std::cerr << "Usage: " << prog << " [--raw <raw.bin>] [--format raw-banks|dl16-raw-rx-v1] [--frag-size <N>] [--json]\n"
               << "Options:\n"
               << "  --raw <path>        Path to raw binary RX capture file\n"
+              << "  --format <name>    Input format (default raw-banks)\n"
               << "  --frag-size <N>     Maximum feed fragment (0..65536; 0/default: one 2048-byte bank)\n"
               << "  --json              Output machine-readable JSON result summary\n";
 }
@@ -27,6 +32,8 @@ int main(int argc, char* argv[]) {
     std::string raw_path;
     size_t frag_size = 2048;
     bool json_output = false;
+    InputFormat format = InputFormat::RawBanks;
+    bool format_set = false;
 
     bool fragment_set = false;
     try {
@@ -37,6 +44,12 @@ int main(int argc, char* argv[]) {
                 if (raw_path.empty() || raw_path.front() == '-') {
                     throw std::invalid_argument("invalid --raw path");
                 }
+            } else if (arg == "--format" && i + 1 < argc && !format_set) {
+                std::string value = argv[++i];
+                if (value == "raw-banks") format = InputFormat::RawBanks;
+                else if (value == "dl16-raw-rx-v1") format = InputFormat::RawRxV1;
+                else throw std::invalid_argument("format must be raw-banks or dl16-raw-rx-v1");
+                format_set = true;
             } else if (arg == "--frag-size" && i + 1 < argc && !fragment_set) {
                 const std::string value = argv[++i];
                 if (value.empty() || value.find_first_not_of("0123456789") != std::string::npos) {
@@ -81,12 +94,14 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     const size_t total_bytes = static_cast<size_t>(file_size);
-    if (total_bytes % USB_BLOCK_SIZE != 0) {
+    if (format == InputFormat::RawBanks && total_bytes % USB_BLOCK_SIZE != 0) {
         std::cerr << "Error: unaligned raw tail; only complete 2048-byte banks can be converted\n";
         return 1;
     }
     in.seekg(0, std::ios::beg);
-    const size_t aligned_bytes = total_bytes;
+    size_t aligned_bytes = 0;
+    uint64_t records = 0, status_errors = 0, discarded_tails = 0, malformed_records = 0;
+    bool malformed = false;
     std::array<uint8_t, USB_BLOCK_SIZE> raw_bytes{};
     std::array<uint8_t, USB_BLOCK_SIZE> converted_bytes{};
     RxParser parser;
@@ -97,19 +112,13 @@ int main(int argc, char* argv[]) {
     bool trigger_offset_rec = false;
     bool complete_rec = false;
 
-    // Convert one bank at a time; drain messages after every bounded feed.
-    for (size_t bank = 0; bank < total_bytes; bank += USB_BLOCK_SIZE) {
-        if (!in.read(reinterpret_cast<char*>(raw_bytes.data()), USB_BLOCK_SIZE)) {
-            std::cerr << "Error: raw file changed or read failed\n";
-            return 1;
-        }
-        convert_to_pc(raw_bytes.data(), converted_bytes.data(), USB_BLOCK_SIZE);
+    auto feed_bank = [&](const uint8_t* raw) {
+        convert_to_pc(raw, converted_bytes.data(), USB_BLOCK_SIZE);
         size_t offset = 0;
         while (offset < converted_bytes.size()) {
             const size_t chunk = std::min(frag_size, converted_bytes.size() - offset);
             parser.push_bytes(converted_bytes.data() + offset, chunk);
             offset += chunk;
-
             while (parser.has_message()) {
                 auto msg_opt = parser.pop_message();
                 if (!msg_opt) break;
@@ -144,9 +153,46 @@ int main(int argc, char* argv[]) {
                 }
             }
         }
+    };
+    auto replay_aligned = [&](size_t bytes) {
+        while (bytes >= USB_BLOCK_SIZE) {
+            if (!in.read(reinterpret_cast<char*>(raw_bytes.data()), USB_BLOCK_SIZE)) throw std::runtime_error("truncated payload");
+            feed_bank(raw_bytes.data());
+            bytes -= USB_BLOCK_SIZE;
+            aligned_bytes += USB_BLOCK_SIZE;
+        }
+    };
+    try {
+    if (format == InputFormat::RawBanks) {
+        replay_aligned(total_bytes);
+    } else {
+        uint8_t magic[8];
+        if (total_bytes < 8 || !in.read(reinterpret_cast<char*>(magic), 8) || std::string(reinterpret_cast<char*>(magic), 8) != RAW_RX_MAGIC) {
+            std::cerr << "Error: invalid dl16-raw-rx-v1 magic/header\n"; return 1;
+        }
+        size_t consumed = 8;
+        while (consumed < total_bytes) {
+            uint8_t header[8];
+            const size_t remain = total_bytes - consumed;
+            if (remain < 8 || !in.read(reinterpret_cast<char*>(header), 8)) { malformed_records++; malformed = true; break; }
+            consumed += 8;
+            uint32_t length = read_le32(header), error = read_le32(header + 4);
+            if (length > total_bytes - consumed) { malformed_records++; malformed = true; break; }
+            records++;
+            if (error != 0) status_errors++;
+            size_t aligned = (length / USB_BLOCK_SIZE) * USB_BLOCK_SIZE;
+            discarded_tails += length - aligned;
+            replay_aligned(aligned);
+            size_t skip = length - aligned;
+            if (skip) { std::array<char, USB_BLOCK_SIZE> tail{}; in.read(tail.data(), static_cast<std::streamsize>(skip)); }
+            if (!in) { malformed_records++; malformed = true; break; }
+            consumed += length;
+        }
     }
 
-    if (in.peek() != std::char_traits<char>::eof()) {
+    } catch (const std::exception& error) { std::cerr << "Error: " << error.what() << "\n"; return 1; }
+
+    if (format == InputFormat::RawBanks && in.peek() != std::char_traits<char>::eof()) {
         std::cerr << "Error: raw file grew during replay\n";
         return 1;
     }
@@ -158,9 +204,14 @@ int main(int argc, char* argv[]) {
                   << "  \"data_integrity\": \"UNKNOWN\",\n"
                   << "  \"capture_completeness\": \"UNKNOWN\",\n"
                   << "  \"buffered_bytes\": " << parser.buffered_bytes() << ",\n"
+                  << "  \"format\": \"" << (format == InputFormat::RawBanks ? "raw-banks" : "dl16-raw-rx-v1") << "\",\n"
+                  << "  \"records\": " << records << ",\n"
+                  << "  \"status_errors\": " << status_errors << ",\n"
+                  << "  \"discarded_tail_bytes\": " << discarded_tails << ",\n"
+                  << "  \"malformed_records\": " << malformed_records << ",\n"
                   << "  \"total_raw_bytes\": " << total_bytes << ",\n"
                   << "  \"aligned_bytes\": " << aligned_bytes << ",\n"
-                  << "  \"unaligned_tail_bytes\": " << (total_bytes - aligned_bytes) << ",\n"
+                  << "  \"unaligned_tail_bytes\": " << (format == InputFormat::RawBanks ? total_bytes - aligned_bytes : discarded_tails) << ",\n"
                   << "  \"total_messages\": " << total_messages << ",\n"
                   << "  \"desync_count\": " << parser.desync_count() << ",\n"
                   << "  \"trigger_ack_received\": " << (trigger_ack ? "true" : "false") << ",\n"
@@ -191,5 +242,5 @@ int main(int argc, char* argv[]) {
                   << "  Complete:        " << (complete_rec ? "yes" : "no") << "\n";
     }
 
-    return 0;
+    return malformed ? 2 : 0;
 }

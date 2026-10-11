@@ -83,3 +83,17 @@ not HIL. Format/completeness boundaries and parent-only hardware recommendation:
 - Keep provenance, git commit IDs and third-party NOTICE when embedding source in the future.
 - GPL Python decoder distribution may have stronger obligations if integrated directly; maintain separation and attribution until legal review.
 - No proprietary hardware firmware, DLLs, Windows drivers, binaries, or hidden device identifiers are committed.
+
+
+## Offline raw-RX container replay (DL16-TASK-048)
+
+The `dl16-raw-rx-v1` reader independently parses TASK-047's documented framing
+(`DL16RX01`, LE32 length and native status ordinal per original read) and reuses
+the repository-owned pinned core's `convert_to_pc` / `RxParser`; no third-party
+code was copied or translated. Each record is processed independently; only its
+aligned bank prefix reaches conversion, and discarded tails/status errors are
+reported. Synthetic actual-executable tests are OFFLINE_SYNTHETIC. Replay of
+`artifacts/hil/DL16-TASK-047/physical/rx.bin` is OFFLINE_REPLAY: a parent-provided
+archived artifact, not new HIL. Parsed Complete is not completeness proof, and no
+channel comparison equivalence is claimed without crop alignment. See
+[TASK-048](tasks/DL16-TASK-048-offline-raw-rx-replay.md).

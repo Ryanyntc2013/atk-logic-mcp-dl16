@@ -199,3 +199,42 @@ def test_offline_raw_replay_rejects_unaligned_tail(tmp_path, replay_cli):
     assert res.returncode != 0
     assert "unaligned raw tail" in res.stderr
     assert not res.stdout
+
+
+def raw_rx_v1(records):
+    import struct
+    return b"DL16RX01" + b"".join(struct.pack("<II", len(payload), status) + payload for payload, status in records)
+
+
+def test_raw_rx_v1_preserves_records_and_discards_each_short_tail(tmp_path, replay_cli):
+    import protocol_reference as ref
+    f6 = ref.build_rx_frame(6, b"")
+    data = raw_rx_v1([(bytes(100) + raw_banks(f6), 0), (b"tail", 5), (raw_banks(f6), 14)])
+    path = tmp_path / "rx.bin"; path.write_bytes(data)
+    result = replay(replay_cli, "--raw", path, "--format", "dl16-raw-rx-v1", "--json")
+    assert result.returncode == 0, result.stderr
+    summary = json.loads(result.stdout)
+    assert summary["records"] == 3 and summary["status_errors"] == 2
+    assert summary["discarded_tail_bytes"] == 104
+    assert summary["total_messages"] == 2
+    assert summary["capture_completeness"] == "UNKNOWN"
+
+
+@pytest.mark.parametrize("data", [b"badmagic", b"DL16RX01\x01", b"DL16RX01" + b"\x04\x00\x00\x00\x00\x00\x00\x00x"])
+def test_raw_rx_v1_rejects_invalid_magic_and_reports_malformed_records(tmp_path, replay_cli, data):
+    path = tmp_path / "bad.bin"; path.write_bytes(data)
+    result = replay(replay_cli, "--raw", path, "--format", "dl16-raw-rx-v1", "--json")
+    assert result.returncode != 0
+    if data.startswith(b"DL16RX01"):
+        assert json.loads(result.stdout)["malformed_records"] == 1
+    else:
+        assert "magic" in result.stderr
+
+
+def test_raw_rx_v1_zero_length_error_record_and_incomplete_header(tmp_path, replay_cli):
+    path = tmp_path / "bad.bin"; path.write_bytes(raw_rx_v1([(b"", 6)]) + b"\x01\x02")
+    result = replay(replay_cli, "--raw", path, "--format", "dl16-raw-rx-v1", "--json")
+    assert result.returncode == 2
+    summary = json.loads(result.stdout)
+    assert summary["records"] == 1 and summary["status_errors"] == 1
+    assert summary["malformed_records"] == 1
