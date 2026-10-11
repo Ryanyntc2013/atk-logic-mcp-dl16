@@ -8,6 +8,8 @@ on:
       - 'scripts/build-vector-harness.ps1'
       - 'scripts/patches/**'
       - 'scripts/async_dispatcher.h'
+      - 'scripts/experimental_stream.h'
+      - 'tests/test_experimental_stream.py'
       - 'tests/test_async_buffer.py'
       - 'tests/test_stream_evidence.py'
       - 'tests/test_incremental_writer.py'
@@ -83,4 +85,4 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install -e '.[dev]'
-          python -m pytest -q tests/test_protocol_vectors.py tests/test_raw_rx_logging.py tests/test_async_buffer.py tests/test_incremental_writer.py tests/test_stream_evidence.py tests/test_task051_observation.py
+          python -m pytest -q tests/test_protocol_vectors.py tests/test_raw_rx_logging.py tests/test_async_buffer.py tests/test_incremental_writer.py tests/test_stream_evidence.py tests/test_task051_observation.py tests/test_experimental_stream.py

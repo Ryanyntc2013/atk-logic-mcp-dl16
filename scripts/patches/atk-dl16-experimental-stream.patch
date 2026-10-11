@@ -1,0 +1,30 @@
+--- a/cli/main.cpp
++++ b/cli/main.cpp
+@@ -103,7 +103,7 @@
+         if(!session::get_string(req,"command",cmd)){emit(session::error_response(id,"INVALID_COMMAND","command must be a string"));continue;}
+         if(cmd=="hello"){
+             int version=0;if(!session::get_integer(req,"protocol",version)||version!=1){emit(session::error_response(id,"UNSUPPORTED_PROTOCOL","protocol must equal 1"));continue;}
+-            emit(session::response(id,"\"ok\":true,\"protocol\":1,\"native_version\":\"1.0.0\",\"commands\":[\"status\",\"capture\",\"pwm\",\"close\",\"raw_rx_log_v1\",\"async_buffer_v1\"]"));continue;
++            emit(session::response(id,"\"ok\":true,\"protocol\":1,\"native_version\":\"1.0.0\",\"commands\":[\"status\",\"capture\",\"pwm\",\"close\",\"raw_rx_log_v1\",\"async_buffer_v1\",\"experimental_stream_v1\"]"));continue;
+         }
+         if(cmd=="close") {
+             bool cleanup_failed=false;
+@@ -127,6 +127,18 @@
+                 emit(session::response(id,"\"ok\":true,\"session\":\"closing\""));
+             }
+             return 0;
++        }
++        if(cmd=="stream_start") {
++            CaptureConfig cfg; std::string directory;
++            if(!dispatcher || !session::stream_config(req,cfg,directory)) {emit(session::error_response(id,"INVALID_STREAM","invalid experimental stream request"));continue;}
++            if(!opened||!dev.is_open()) {auto e=dev.open();if(!e){opened=false;emit(session::error_response(id,"DEVICE_OPEN_FAILED",e.message));continue;}opened=true;}
++            try {
++                auto observed=session::run_stream(cfg,directory,dispatcher->cancel,
++                    [&](const std::vector<uint8_t>& f,int timeout){return static_cast<bool>(dev.transport().write_bulk(EP_BULK_OUT,f.data(),f.size(),timeout));},
++                    [&](uint8_t* data,size_t size,size_t& n,int timeout){return static_cast<bool>(dev.transport().read_bulk(EP_BULK_IN,data,size,n,timeout));});
++                emit(session::response(id,session::stream_result(observed,directory)));
++            } catch(const std::exception& e) {emit(session::error_response(id,"STREAM_WRITE_ERROR",e.what()));}
++            continue;
+         }
+         if(cmd!="status"&&cmd!="capture"&&cmd!="pwm"){emit(session::error_response(id,"UNKNOWN_COMMAND","unsupported command"));continue;}
+         if(cmd=="pwm"){

@@ -2,7 +2,7 @@ diff --git a/core/include/atkdl16/incremental_packed_writer.h b/core/include/atk
 new file mode 100644
 --- /dev/null
 +++ b/core/include/atkdl16/incremental_packed_writer.h
-@@ -0,0 +1,118 @@
+@@ -0,0 +1,119 @@
 +#pragma once
 +#include <algorithm>
 +#include <array>
@@ -56,12 +56,12 @@ new file mode 100644
 +    IncrementalPackedWriter(const std::filesystem::path& directory,
 +                            std::vector<unsigned> channels, uint64_t rate,
 +                            unsigned duration_ms, const std::string& evidence,
-+                            uint64_t budget = max_bytes)
++                            uint64_t budget = max_bytes, bool preserve_all_channels = false)
 +        : directory_(directory), channels_(std::move(channels)),
 +          requested_(rate * duration_ms / 1000), rate_(rate), budget_(budget), evidence_(evidence) {
 +        auto sorted = channels_;
 +        std::sort(sorted.begin(), sorted.end());
-+        if (channels_.empty() || channels_.size() > 2 || sorted.back() > 15 ||
++        if (channels_.empty() || channels_.size() > (preserve_all_channels ? 16 : 2) || sorted.back() > 15 ||
 +            std::adjacent_find(sorted.begin(), sorted.end()) != sorted.end() ||
 +            rate < 1 || rate > 20000000 || !duration_ms || duration_ms > 30000 ||
 +            !budget || budget > max_bytes ||
@@ -101,7 +101,8 @@ new file mode 100644
 +    void finish(const std::string& reason) {
 +        if (closed_) return;
 +        if (reason != "CANCELLED" && reason != "BYTE_CAP" && reason != "WRITE_ERROR" &&
-+            reason != "OWNER_ERROR" && reason != "TAIL_UNVERIFIED" && reason != "ABANDONED")
++            reason != "OWNER_ERROR" && reason != "TAIL_UNVERIFIED" && reason != "ABANDONED" &&
++            reason != "DEADLINE" && reason != "ORDER6_OBSERVED" && reason != "USB_ERROR" && reason != "SHORT_RX")
 +            throw std::invalid_argument("invalid finish reason");
 +        closed_ = true;
 +        reason_ = reason;

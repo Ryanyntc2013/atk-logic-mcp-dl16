@@ -92,3 +92,7 @@ target_link_libraries(dl16-raw-rx-logging-test PRIVATE "${UP}/build/Release/atkd
 add_executable(dl16-raw-rx-replay raw_rx_replay.cpp)
 target_include_directories(dl16-raw-rx-replay PRIVATE "${UP}/core/include")
 target_link_libraries(dl16-raw-rx-replay PRIVATE "${UP}/build/Release/atkdl16_core.lib")
+
+add_executable(dl16-experimental-stream-test experimental_stream_test.cpp)
+target_include_directories(dl16-experimental-stream-test PRIVATE "${UP}/core/include" "${UP}/cli" "${CMAKE_CURRENT_SOURCE_DIR}/../../scripts")
+target_link_libraries(dl16-experimental-stream-test PRIVATE "${UP}/build/Release/atkdl16_core.lib")

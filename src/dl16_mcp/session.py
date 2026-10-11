@@ -251,8 +251,8 @@ class NativeSession:
             self._start()
             if not self._hello:
                 raise SessionFailure("SESSION_PROTOCOL_ERROR", "native hello handshake missing")
-            if request.get("command") in {"stream_start", "stream_poll", "stream_cancel"}:
-                raise SessionFailure("STREAM_TAIL_UNVERIFIED", "Live Stream is unavailable; native incremental writer is an offline foundation only")
+            if request.get("command") in {"stream_start", "stream_poll", "stream_cancel"} and "experimental_stream_v1" not in self.capabilities:
+                raise SessionFailure("NATIVE_CAPABILITY_MISSING", "native worker lacks experimental Stream v1")
             if request.get("command") in {"capture_start", "capture_poll", "capture_cancel"} and "async_buffer_v1" not in self.capabilities:
                 raise SessionFailure("NATIVE_CAPABILITY_MISSING", "native hello does not advertise cancellable async BUFFER v1")
             if request.get("command") == "pwm" and "pwm" not in self.capabilities:
@@ -260,9 +260,10 @@ class NativeSession:
             if "raw_rx_path" in request and "raw_rx_log_v1" not in self.capabilities:
                 raise SessionFailure("NATIVE_CAPABILITY_MISSING", "native hello does not advertise raw RX logging v1")
             response = self._request_locked(request, timeout_s=timeout_s)
-            if request.get("command") == "capture_start":
+            if request.get("command") in {"capture_start", "stream_start"}:
                 self._operation_id = response.get("operation_id")
-            elif request.get("command") == "capture_poll" and response.get("state") == "finished":
+                self._operation_kind = "stream" if request.get("command") == "stream_start" else "capture"
+            elif request.get("command") in {"capture_poll", "stream_poll"} and response.get("state") == "finished":
                 self._operation_id = None
             return response
 
@@ -315,10 +316,11 @@ class NativeSession:
                 try:
                     if self._operation_id is not None:
                         op = self._operation_id
-                        self._request_locked({"command": "capture_cancel", "operation_id": op}, timeout_s=1)
+                        kind = getattr(self, "_operation_kind", "capture")
+                        self._request_locked({"command": f"{kind}_cancel", "operation_id": op}, timeout_s=1)
                         deadline = time.monotonic() + 3
                         while True:
-                            response = self._request_locked({"command": "capture_poll", "operation_id": op}, timeout_s=1)
+                            response = self._request_locked({"command": f"{kind}_poll", "operation_id": op}, timeout_s=1)
                             if response.get("state") == "finished":
                                 self._operation_id = None
                                 break

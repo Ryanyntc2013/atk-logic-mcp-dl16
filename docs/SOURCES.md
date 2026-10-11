@@ -1,5 +1,20 @@
 # Upstream provenance and reuse matrix (2026-10-10)
 
+## TASK-055 experimental Stream provenance
+
+Independently authored `scripts/experimental_stream.h` and tracked native owner
+patch connect pinned CPP transport/builders/parser to TASK050 writer/TASK049 owner.
+No LHX source copied/translated. Narrow LHX pin `8d7c209c1e3b13923620bb34cec915291a749612`
+`dl16_cli/streaming.py` filters selected channels, stops at requested packed count,
+discards same-packet excess/common-depth truncation. Vendor Buffer-only Order3 crop
+and Stream Order6 termination are distinct. Those strategies do not validate our
+Stream prefix/tail alignment. TASK051/053 all16 observations justify conservative
+all16 bandwidth/storage, not selection guarantees. This implementation retains all
+actual bytes and raw Order3 hex; no crop/COMPLETE/analysis-ready/HIL claim. Optional
+raw logging disabled to preserve aggregate budget. Source pins/line scopes, tests
+and parent-only bounded invocation: [TASK055](tasks/DL16-TASK-055-experimental-live-stream.md).
+
+
 ## TASK-054 Order3 offline discriminator provenance
 
 `src/dl16_mcp/order3_diagnostics.py` is an independently authored bounded

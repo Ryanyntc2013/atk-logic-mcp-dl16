@@ -1,0 +1,104 @@
+"""TASK055 actual production receive/writer/dispatcher; transport is SYNTHETIC_OFFLINE."""
+import json
+import subprocess
+import time
+from pathlib import Path
+
+import pytest
+
+from dl16_mcp import backend, service
+
+ROOT = Path(__file__).resolve().parents[1]
+HARNESS = ROOT / "tests/native/build/Release/dl16-experimental-stream-test.exe"
+CONFIRM = "CONFIRMED_SAFE_WIRING_GUI_CLOSED"
+
+
+@pytest.mark.skipif(not HARNESS.exists(), reason="native Stream integration harness not built")
+def test_actual_receive_incremental_all16_cancel_and_eof(tmp_path):
+    directory = tmp_path / "stream"
+    proc = subprocess.Popen([str(HARNESS), str(directory)], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, text=True)
+
+    def request(command, **fields):
+        proc.stdin.write(json.dumps({"request_id": command, "command": command, **fields}) + "\n")
+        proc.stdin.flush()
+        return json.loads(proc.stdout.readline())
+
+    config = {"channels": [8, 14], "sample_rate_hz": 1_000_000, "duration_ms": 1000,
+              "threshold_voltage": 1.6, "output_dir": str(directory), "experimental_opt_in": True,
+              "safety_confirmation": CONFIRM}
+    try:
+        assert request("stream_start", **config)["state"] == "running"
+        deadline = time.monotonic() + 3
+        while not (directory / "ch15.packed.bin").exists() or (directory / "ch15.packed.bin").stat().st_size == 0:
+            assert time.monotonic() < deadline
+            time.sleep(0.005)
+        assert request("stream_poll", operation_id="stream_start")["state"] == "running"
+        assert request("capture_start", channels=[8], sample_rate_hz=1_000_000,
+                       duration_ms=10)["error_code"] == "SESSION_BUSY"
+        assert request("stream_cancel", operation_id="wrong")["error_code"] == "UNKNOWN_OPERATION"
+        assert request("stream_cancel", operation_id="stream_start")["ok"]
+        while True:
+            reply = request("stream_poll", operation_id="stream_start")
+            if reply["state"] == "finished":
+                break
+            assert time.monotonic() < deadline
+        result = reply["response"]["result"]
+        assert result["reason"] == "CANCELLED"
+        assert result["cleanup_stop_ok"]
+        assert result["analysis_ready"] is False
+        assert result["success"] is False
+        meta = json.loads((directory / "stream_meta.json").read_text())
+        assert meta["evidence_source"] == "SYNTHETIC_OFFLINE"
+        assert meta["tail_status"] == "UNKNOWN"
+        assert meta["data_integrity"] == "INCOMPLETE"
+        assert len(meta["channels"]) == 16
+        for ch in range(16):
+            data = (directory / f"ch{ch}.packed.bin").read_bytes()
+            assert data and data == b"\x81\xaa\xaa\xaa" * (len(data) // 4)
+        assert request("close")["ok"]
+        assert proc.wait(timeout=3) == 0
+    finally:
+        if proc.poll() is None:
+            proc.stdin.close()
+            proc.wait(timeout=3)
+        proc.stdout.close()
+        if not proc.stdin.closed:
+            proc.stdin.close()
+    eof = tmp_path / "eof"
+    config["output_dir"] = str(eof)
+    line = json.dumps({"request_id": "eof", "command": "stream_start", **config})
+    completed = subprocess.run([str(HARNESS), str(eof)], input=line + "\n", capture_output=True,
+                               text=True, timeout=3, check=True)
+    assert json.loads(completed.stdout.splitlines()[0])["ok"]
+    assert json.loads((eof / "stream_meta.json").read_text())["reason"] == "CANCELLED"
+
+
+def test_host_prelaunch_confirmation_and_all16_budget(monkeypatch):
+    monkeypatch.setattr(backend, "find_native_cli", lambda: pytest.fail("must reject before worker"))
+    assert service.logic_stream_start()["error_code"] == "EXPERIMENTAL_OPT_IN_REQUIRED"
+    assert service.logic_stream_start(True)["error_code"] == "INVALID_STREAM"
+    assert service.logic_stream_start(True, CONFIRM, [8, 14], 20_000_000, 30_000)["error_code"] == "INVALID_STREAM"
+    assert service.logic_stream_start(True, CONFIRM, [8, 14], 25_000_000, 10)["error_code"] == "INVALID_STREAM"
+
+
+def test_public_start_and_control_route_without_relabel(monkeypatch, tmp_path):
+    class Owner:
+        failed = False
+        def request(self, payload, **kwargs):
+            if payload["command"] == "stream_start":
+                assert payload["experimental_opt_in"] is True
+                assert payload["safety_confirmation"] == CONFIRM
+                assert payload["channels"] == [8, 14]
+                return {"ok": True, "operation_id": "op", "state": "running"}
+            return {"ok": True, "state": "finished", "response": {"result": {
+                "success": False, "data_integrity": "INCOMPLETE", "tail_status": "UNKNOWN"}}}
+    owner = Owner()
+    monkeypatch.setattr(backend, "_session_enabled", lambda: True)
+    monkeypatch.setattr(backend, "find_native_cli", lambda: Path("worker"))
+    monkeypatch.setattr(backend, "_get_session", lambda _: owner)
+    monkeypatch.setattr(backend, "captures_dir", lambda: tmp_path)
+    monkeypatch.setattr(backend, "_SESSION", owner)
+    assert service.logic_stream_start(True, CONFIRM, [8, 14])["operation_id"] == "op"
+    assert not service.logic_stream_poll("op")["response"]["result"]["success"]
+    assert service.logic_stream_cancel("op")["response"]["result"]["tail_status"] == "UNKNOWN"

@@ -13,9 +13,23 @@ from .config import CAPTURE_ID_RE, CaptureRequest, captures_dir, exports_dir
 from .decoders import decode_i2c, decode_spi, decode_uart
 
 
-def logic_stream_start(experimental_opt_in: bool = False) -> dict[str, Any]:
-    """Expose the explicit blocked boundary, not a BUFFER alias or live capability."""
-    return backend.stream_start(experimental_opt_in=experimental_opt_in)
+def logic_stream_start(experimental_opt_in: bool = False, safety_confirmation: str = "",
+                       channels: list[int] | None = None, sample_rate_hz: int = 20_000_000,
+                       duration_ms: int = 20, threshold_voltage: float = 1.6) -> dict:
+    """EXPERIMENTAL Stream: requires CONFIRMED_SAFE_WIRING_GUI_CLOSED; all16 uncropped artifacts remain INCOMPLETE/UNKNOWN, never analysis-ready."""
+    return backend.stream_start(experimental_opt_in=experimental_opt_in,
+        safety_confirmation=safety_confirmation, channels=channels, sample_rate_hz=sample_rate_hz,
+        duration_ms=duration_ms, threshold_voltage=threshold_voltage)
+
+
+def logic_stream_poll(operation_id: str) -> dict:
+    """Bounded experimental operation status; partial packed bytes are untrusted."""
+    return backend.stream_control(operation_id)
+
+
+def logic_stream_cancel(operation_id: str) -> dict:
+    """Request cooperative same-owner stop; poll until finished, then close session."""
+    return backend.stream_control(operation_id, cancel=True)
 
 
 def logic_status() -> dict[str, Any]:

@@ -1,3 +1,18 @@
+# Latest continuation ? TASK-055, 2026-10-11
+
+DONE offline implementation / NEEDS_HUMAN_HIL. Actual opt-in experimental native
+Stream now uses TASK049 owner and TASK050 incremental writer, not Buffer alias.
+All actual16 retained uncropped; INCOMPLETE/UNKNOWN/null valid samples forever;
+no analysis readiness, raw logging or edges. Explicit opt-in and safe-wiring/GUI
+confirmation, guarded experimental_stream_v1, <=20MHz/30s with all16 budget,
+199MiB packed +1MiB metadata reservation. Real start/poll/cancel/EOF integration,
+bounded16KiB RX/10ms calls; no full-capture RAM. Tracked patch/bootstrap persisted.
+Child OFFLINE ONLY, HIL_NOT_RUN, no commit. Bootstrap -SkipTests and harness built;
+29 targeted /289 full passed, compileall/diff-check passed. Parent single bounded
+cancel invocation and exact source comparisons/limitations:
+[tasks/DL16-TASK-055-experimental-live-stream.md](tasks/DL16-TASK-055-experimental-live-stream.md).
+Prior blocked notes below are historical; trusted Stream still unavailable.
+
 # Latest continuation — TASK-054, 2026-10-11
 
 DONE: added import-safe `dl16_mcp.order3_diagnostics` for bounded offline Order3

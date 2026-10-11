@@ -116,22 +116,22 @@ def test_legacy_workers_reject_before_stream_dispatch(tmp_path, command):
     try:
         with pytest.raises(SessionFailure) as exc:
             session.request({"command": command}, timeout_s=2)
-        assert exc.value.code == "STREAM_TAIL_UNVERIFIED"
+        assert exc.value.code == "NATIVE_CAPABILITY_MISSING"
         assert record.read_text().splitlines() == ["hello"]
     finally:
         session.close()
 
 
 @pytest.mark.skipif(not NATIVE.exists(), reason="patched native worker not built")
-def test_actual_worker_never_advertises_stream_or_opens_for_stream():
+def test_actual_worker_advertises_only_connected_experimental_stream():
     requests = [json.dumps({"request_id": "hello", "command": "hello", "protocol": 1}),
                 json.dumps({"request_id": "stream", "command": "stream_start"}),
                 json.dumps({"request_id": "close", "command": "close"})]
     reply = subprocess.run([str(NATIVE), "session", "--jsonl"], input="\n".join(requests) + "\n",
                            capture_output=True, text=True, timeout=3, check=True)
     results = {result["request_id"]: result for result in map(json.loads, reply.stdout.splitlines())}
-    assert not any("stream" in capability.lower() for capability in results["hello"]["commands"])
-    assert results["stream"]["error_code"] == "STREAM_TAIL_UNVERIFIED"
+    assert "experimental_stream_v1" in results["hello"]["commands"]
+    assert results["stream"]["error_code"] == "INVALID_STREAM"
     assert results["close"]["ok"]
 
 
@@ -139,6 +139,6 @@ def test_mcp_service_boundary_never_launches_or_creates_artifacts(monkeypatch):
     monkeypatch.setattr(backend, "find_native_cli", lambda: pytest.fail("must not launch"))
     monkeypatch.setattr(backend, "captures_dir", lambda: pytest.fail("must not create"))
     assert service.logic_stream_start()["error_code"] == "EXPERIMENTAL_OPT_IN_REQUIRED"
-    assert service.logic_stream_start(True)["error_code"] == "STREAM_TAIL_UNVERIFIED"
+    assert service.logic_stream_start(True)["error_code"] == "INVALID_STREAM"
     from dl16_mcp import server
-    assert server.logic_stream_start(True)["stream_available"] is False
+    assert server.logic_stream_start(True)["error_code"] == "INVALID_STREAM"

@@ -105,6 +105,13 @@ if ($LASTEXITCODE -ne 0) { throw 'Incremental writer patch check failed' }
 git -C $Dst apply $WriterPatch
 if ($LASTEXITCODE -ne 0) { throw 'Incremental writer patch apply failed' }
 
+Copy-Item -LiteralPath (Join-Path $RepoRoot 'scripts\experimental_stream.h') -Destination (Join-Path $Dst 'cli\experimental_stream.h') -Force
+$StreamPatch = Join-Path $RepoRoot 'scripts\patches\atk-dl16-experimental-stream.patch'
+git -C $Dst apply --check $StreamPatch
+if ($LASTEXITCODE -ne 0) { throw 'Experimental Stream patch check failed' }
+git -C $Dst apply $StreamPatch
+if ($LASTEXITCODE -ne 0) { throw 'Experimental Stream patch apply failed' }
+
 if (-not $SkipBuild) {
   # Prefer the requested toolset only when it is actually installed on this machine;
   # otherwise fall back to the installed default (let CMake pick v143).

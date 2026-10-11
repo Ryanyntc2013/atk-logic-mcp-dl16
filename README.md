@@ -156,3 +156,16 @@ For what to do next in Codex, see [`AGENTS.md`](AGENTS.md) and [`docs/LOCAL-HAND
 ## License and attribution
 
 This project's own integration is licensed **GPL-3.0-or-later**. The pinned native upstream is separately cloned and carries its own GPL notice; vendor projects are **not redistributed here**. This does not imply endorsement by ALIENTEK or any third-party maintainer. Do not paste code from another project's implementation without preserving license and attribution. See `LICENSE` and `docs/SOURCES.md`.
+
+
+### Experimental asynchronous Stream (TASK055)
+
+Current rebuilt session workers expose opt-in `logic_stream_start/poll/cancel`
+with `experimental_stream_v1` capability guard. Start requires explicit
+`experimental_opt_in=True`, `safety_confirmation="CONFIRMED_SAFE_WIRING_GUI_CLOSED"`
+and confirmed channels/threshold. This is genuine Stream, not trusted capture:
+all actual16 channel bytes retained incrementally, uncropped INCOMPLETE/UNKNOWN,
+null valid samples, no edges/analysis. <=20MHz/30s and conservative all16 aggregate
+200MiB budget;20MHz/30s is rejected. No hardware validation by child.
+See [TASK055](docs/tasks/DL16-TASK-055-experimental-live-stream.md) for exact limits,
+source comparison, tests and parent-only single bounded cancellation invocation.

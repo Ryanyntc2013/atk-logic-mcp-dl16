@@ -1,5 +1,6 @@
 #pragma once
 #include "session_protocol.h"
+#include "experimental_stream.h"
 #include <atomic>
 #include <condition_variable>
 #include <deque>
@@ -16,6 +17,7 @@ class AsyncDispatcher {
     std::function<void(const std::string&)> output_;
     bool ending_{false}, active_{false};
     std::string operation_, result_;
+    bool stream_operation_{false};
 public:
     std::atomic<bool> cancel{false};
     std::atomic<bool> closing{false};
@@ -31,18 +33,23 @@ public:
             return;
         }
         std::unique_lock<std::mutex> lock(mutex_);
-        if(cmd=="stream_start" || cmd=="stream_poll" || cmd=="stream_cancel") {
-            lock.unlock(); output(error_response(id,"STREAM_TAIL_UNVERIFIED","live Stream unavailable: incremental writer foundation only")); return;
-        }
-        if(cmd=="capture_poll" || cmd=="capture_cancel") {
+        if(cmd=="capture_poll" || cmd=="capture_cancel" || cmd=="stream_poll" || cmd=="stream_cancel") {
             std::string op;
             if(!get_string(req,"operation_id",op) || op!=operation_ || op.empty()) {
                 lock.unlock(); output(error_response(id,"UNKNOWN_OPERATION","operation ID does not match")); return;
             }
-            if(cmd=="capture_cancel" && active_) cancel.store(true);
+            if((cmd.rfind("stream_",0)==0)!=stream_operation_) {lock.unlock();output(error_response(id,"UNKNOWN_OPERATION","wrong operation kind"));return;}
+            if((cmd=="capture_cancel" || cmd=="stream_cancel") && active_) cancel.store(true);
             std::string fields="\"ok\":true,\"operation_id\":\""+json_escape(op)+"\",\"state\":\""+(active_?"running":"finished")+"\"";
             if(!active_ && !result_.empty()) fields+=",\"response\":"+result_;
             lock.unlock(); output(response(id,fields)); return;
+        }
+        if(cmd=="stream_start") {
+            CaptureConfig cfg; std::string directory;
+            if(!stream_config(req,cfg,directory)) {lock.unlock();output(error_response(id,"INVALID_STREAM","experimental Stream needs explicit opt-in, safe wiring confirmation and bounded all16 budget"));return;}
+            if(active_ || !queue_.empty()) {lock.unlock();output(error_response(id,"SESSION_BUSY","owner is busy"));return;}
+            active_=true;stream_operation_=true;cancel.store(false);operation_=id;result_.clear();queue_.push_back(line);ready_.notify_one();
+            lock.unlock();output(response(id,"\"ok\":true,\"operation_id\":\""+json_escape(id)+"\",\"state\":\"running\",\"experimental\":true"));return;
         }
         if(cmd=="capture_start") {
             std::vector<uint8_t> channels; int duration=0, timeout=30; double rate=0; std::string trigger="immediate";
@@ -52,7 +59,7 @@ public:
             if(get(req,"mode") || get(req,"rle")) valid=false;
             if(!valid) { lock.unlock(); output(error_response(id,"INVALID_CAPTURE","async BUFFER requires <=2 channels, <=20MHz, <=30s, immediate trigger, no mode/RLE")); return; }
             if(active_ || !queue_.empty()) { lock.unlock(); output(error_response(id,"SESSION_BUSY","owner is busy")); return; }
-            active_=true; cancel.store(false); operation_=id; result_.clear();
+            active_=true; stream_operation_=false; cancel.store(false); operation_=id; result_.clear();
             std::string work=line;
             // Find the command member rather than another user string with this value.
             size_t key=0, at=std::string::npos;
