@@ -179,3 +179,53 @@ def test_selftest_stream_poll_error_requests_cancel(monkeypatch):
     assert "cancel" in actions
     assert "close" in actions
     assert result["cleanup_ok"] is False
+
+
+def test_packed_glitch_filter_matches_previous_bitwise_semantics():
+    from dl16_mcp.analysis import glitch_filter
+    rng = np.random.default_rng(66066)
+    for length in (1, 2, 7, 8, 9, 31, 256, 1025):
+        for threshold in (1, 2, 3, 5, 16):
+            arr = rng.integers(0, 2, size=length, dtype=np.uint8)
+            packed = np.packbits(arr, bitorder="little").tobytes()
+            changes = np.flatnonzero(np.diff(arr.astype(np.int8))) + 1
+            starts = np.concatenate(([0], changes))
+            ends = np.concatenate((changes, [length]))
+            baseline = arr.copy()
+            last_stable = None
+            expected_removed = 0
+            for k, (start, end) in enumerate(zip(starts, ends)):
+                if end - start >= threshold:
+                    last_stable = int(arr[start])
+                else:
+                    fill = (int(arr[starts[k + 1]]) if k + 1 < len(starts) else 0) if last_stable is None else last_stable
+                    baseline[start:end] = fill
+                    expected_removed += 1
+            got, removed = glitch_filter(packed, length, min_pulse_samples=threshold)
+            assert np.unpackbits(np.frombuffer(got, dtype=np.uint8), bitorder="little")[:length].tolist() == baseline.tolist()
+            assert removed == expected_removed
+
+
+def test_selftest_normal_fixture_is_uncalibrated_not_healthy(monkeypatch):
+    _selftest_setup(monkeypatch)
+    stops = []
+    monkeypatch.setattr(service, "logic_pwm", lambda output, action="configure", *a, **kw: (
+        stops.append((output, action)) or {"success": True}))
+    monkeypatch.setattr(service, "logic_capture",
+                        lambda **kw: {"success": True, "capture_id": "buffer-id"})
+    monkeypatch.setattr(service, "logic_measure_pwm",
+                        lambda cid, ch: {"frequency_hz_median": 1000 if ch == 8 else 2000,
+                                         "integrity": "INCOMPLETE" if cid == "stream-id" else "COMPLETE"})
+    monkeypatch.setattr(service, "logic_session_close", lambda: {"success": True})
+    monkeypatch.setattr(service, "logic_stream_start", lambda **kw: {"operation_id": "stream-op"})
+    monkeypatch.setattr(service, "logic_stream_poll",
+                        lambda op: {"state": "finished", "response": {"result": {
+                            "reason": "DEADLINE", "cleanup_stop_ok": True,
+                            "stored_bytes": 32000, "artifact_directory": "captures/stream-id"}}})
+    result = service.logic_self_test(confirm_safe_wiring=True)
+    assert result["success"] is True
+    assert result["overall_health"] == "DIAGNOSTIC_PASS_UNCALIBRATED"
+    assert result["stream_capture"]["data_integrity"] == "INCOMPLETE"
+    assert result["calibrated_timing_verified"] is False
+    assert result["cleanup_ok"] is True
+    assert (0, "stop") in stops and (1, "stop") in stops
