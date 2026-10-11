@@ -1,5 +1,16 @@
 # Upstream provenance and reuse matrix (2026-10-10)
 
+## TASK-058 Stream raw-RX logging boundary
+
+Tracked native patch `scripts/patches/atk-dl16-experimental-stream.patch` and
+`scripts/experimental_stream.h` incorporate optional bounded raw-RX recording into
+the experimental Stream path. Implemented independently against pinned CPP
+`5fc47744c18c99f9ad0f554a965eb8cd1160c836` using the existing `RawRxWriter` (from TASK-047),
+writing format `DL16RX01`. Whole-record framing and fail-closed disk errors ensure raw
+short/error reads (including the 1024-byte short read observed in TASK-057) are captured
+without altering fail-closed conversion semantics or promoting data completeness.
+See [TASK-058 scope and evidence](tasks/DL16-TASK-058-stream-raw-rx-logging.md).
+
 ## TASK-057 Stream progress and measured IO provenance
 
 Independently authored atomic owner-publication counters and steady-clock IO

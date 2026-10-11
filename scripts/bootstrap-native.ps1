@@ -107,6 +107,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Incremental writer patch apply failed' }
 
 # TASK-057 publishes atomic progress from owner-only IO; deadlines and per-chunk flush stay unchanged.
 Copy-Item -LiteralPath (Join-Path $RepoRoot 'scripts\experimental_stream.h') -Destination (Join-Path $Dst 'cli\experimental_stream.h') -Force
+# TASK058: generated owner-local rx.bin, whole-record raw cap within combined Stream budget.
 $StreamPatch = Join-Path $RepoRoot 'scripts\patches\atk-dl16-experimental-stream.patch'
 git -C $Dst apply --check $StreamPatch
 if ($LASTEXITCODE -ne 0) { throw 'Experimental Stream patch check failed' }

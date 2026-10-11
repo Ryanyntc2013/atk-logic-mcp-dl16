@@ -1,3 +1,17 @@
+# Latest continuation — TASK-058, 2026-10-11
+
+DONE offline / NEEDS_HUMAN_HIL; HIL_NOT_RUN, no commit. Added optional bounded
+`dl16-raw-rx/v1` logging into the actual experimental Stream path prior to transform,
+preserving exact raw short/error reads (such as the 1024-byte short read in TASK-057)
+within a <=200MiB combined storage budget. Reuses existing `RawRxWriter` with
+whole-record framing and fail-closed disk errors. Hello advertises
+`experimental_stream_raw_rx_v1`, guarded by Python session. Short RX fail-closed
+conversion rule remains unchanged (`SHORT_RX`); data integrity remains `INCOMPLETE/UNKNOWN`.
+Validation: **306 full passed**, compileall, native harness, diff-check clean.
+Parent HIL recommendation: run ONE 1MHz/1000ms capture with `raw_rx_logging=True` to
+reproduce and preserve the physical short-RX raw frame evidence.
+Exact details: [tasks/DL16-TASK-058-stream-raw-rx-logging.md](tasks/DL16-TASK-058-stream-raw-rx-logging.md).
+
 # Latest continuation ? TASK-057, 2026-10-11
 
 DONE offline / NEEDS_HUMAN_HIL; HIL_NOT_RUN, no hardware/no commit. Stream poll

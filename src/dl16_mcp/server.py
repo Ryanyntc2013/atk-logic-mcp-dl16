@@ -10,11 +10,13 @@ mcp = FastMCP("atk-logic-mcp-dl16")
 @mcp.tool()
 def logic_stream_start(experimental_opt_in: bool = False, safety_confirmation: str = "",
                        channels: list[int] | None = None, sample_rate_hz: int = 20_000_000,
-                       duration_ms: int = 20, threshold_voltage: float = 1.6) -> dict:
+                       duration_ms: int = 20, threshold_voltage: float = 1.6,
+                       raw_rx_logging: bool = False, raw_rx_max_bytes: int = 33_554_432) -> dict:
     """EXPERIMENTAL Stream: requires CONFIRMED_SAFE_WIRING_GUI_CLOSED; all16 uncropped artifacts remain INCOMPLETE/UNKNOWN, never analysis-ready."""
     return service.logic_stream_start(experimental_opt_in=experimental_opt_in,
         safety_confirmation=safety_confirmation, channels=channels, sample_rate_hz=sample_rate_hz,
-        duration_ms=duration_ms, threshold_voltage=threshold_voltage)
+        duration_ms=duration_ms, threshold_voltage=threshold_voltage,
+        raw_rx_logging=raw_rx_logging, raw_rx_max_bytes=raw_rx_max_bytes)
 
 
 @mcp.tool()

@@ -26,7 +26,7 @@ def test_actual_receive_incremental_all16_cancel_and_eof(tmp_path):
 
     config = {"channels": [8, 14], "sample_rate_hz": 1_000_000, "duration_ms": 1000,
               "threshold_voltage": 1.6, "output_dir": str(directory), "experimental_opt_in": True,
-              "safety_confirmation": CONFIRM}
+              "safety_confirmation": CONFIRM, "raw_rx_logging": True, "raw_rx_max_bytes": 33554432}
     try:
         assert request("stream_start", **config)["state"] == "running"
         deadline = time.monotonic() + 3
@@ -37,7 +37,7 @@ def test_actual_receive_incremental_all16_cancel_and_eof(tmp_path):
             progress = poll["progress"]
             assert progress["stored_bytes"] >= previous
             previous = progress["stored_bytes"]
-            assert set(progress) == {"stored_bytes", "reads", "receive_elapsed_ns",
+            assert set(progress) == {"raw_rx_log", "stored_bytes", "reads", "receive_elapsed_ns",
                                      "packed_write_elapsed_ns", "packed_flush_elapsed_ns"}
             if previous >= 64:
                 assert progress["reads"] >= 16
@@ -56,6 +56,8 @@ def test_actual_receive_incremental_all16_cancel_and_eof(tmp_path):
                 break
             assert time.monotonic() < deadline
         result = reply["response"]["result"]
+        assert result["raw_rx_log"]["closed"]
+        assert not result["raw_rx_log"]["error"]
         assert result["reason"] == "CANCELLED"
         assert 64 <= result["stored_bytes"] <= 2048
         assert reply["progress"]["stored_bytes"] == result["stored_bytes"]
@@ -108,6 +110,10 @@ def test_public_start_and_control_route_without_relabel(monkeypatch, tmp_path):
                 assert payload["experimental_opt_in"] is True
                 assert payload["safety_confirmation"] == CONFIRM
                 assert payload["channels"] == [8, 14]
+                assert payload["raw_rx_logging"] is True
+                assert payload["raw_rx_max_bytes"] == 33554432
+                assert "raw_rx_path" not in payload
+                assert Path(payload["output_dir"]).parent == tmp_path
                 return {"ok": True, "operation_id": "op", "state": "running"}
             return {"ok": True, "state": "finished", "progress": {"stored_bytes": 17, "reads": 2}, "response": {"result": {
                 "success": False, "data_integrity": "INCOMPLETE", "tail_status": "UNKNOWN"}}}
@@ -117,7 +123,7 @@ def test_public_start_and_control_route_without_relabel(monkeypatch, tmp_path):
     monkeypatch.setattr(backend, "_get_session", lambda _: owner)
     monkeypatch.setattr(backend, "captures_dir", lambda: tmp_path)
     monkeypatch.setattr(backend, "_SESSION", owner)
-    assert service.logic_stream_start(True, CONFIRM, [8, 14])["operation_id"] == "op"
+    assert service.logic_stream_start(True, CONFIRM, [8, 14], raw_rx_logging=True)["operation_id"] == "op"
     assert service.logic_stream_poll("op")["progress"] == {"stored_bytes": 17, "reads": 2}
     assert not service.logic_stream_poll("op")["response"]["result"]["success"]
     assert service.logic_stream_cancel("op")["response"]["result"]["tail_status"] == "UNKNOWN"
@@ -179,3 +185,76 @@ def test_actual_stream_terminal_failures_and_progress_reset(tmp_path, mode, reas
         proc.stdout.close()
         if not proc.stdin.closed:
             proc.stdin.close()
+
+
+@pytest.mark.skipif(not HARNESS.exists(), reason="native Stream integration harness not built")
+@pytest.mark.parametrize("mode,limit", [("short", 33554432), ("error_bytes", 33554432),
+                                      ("usb_error", 33554432), ("short", 100),
+                                      ("raw_write_error", 33554432),
+                                      ("raw_flush_error", 33554432), ("raw_close_error", 33554432)])
+def test_actual_stream_raw_records_caps_and_disk_failure(tmp_path, mode, limit):
+    import struct
+    directory = tmp_path / "logged"
+    proc = subprocess.Popen([str(HARNESS), str(directory), mode], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, text=True)
+    def request(command, **fields):
+        proc.stdin.write(json.dumps({"request_id": command, "command": command, **fields}) + "\n")
+        proc.stdin.flush()
+        return json.loads(proc.stdout.readline())
+    try:
+        assert request("stream_start", channels=[8, 14], sample_rate_hz=1_000_000,
+                       duration_ms=100, threshold_voltage=1.6, output_dir=str(directory),
+                       experimental_opt_in=True, safety_confirmation=CONFIRM,
+                       raw_rx_logging=True, raw_rx_max_bytes=limit)["ok"]
+        deadline = time.monotonic() + 3
+        while True:
+            reply = request("stream_poll", operation_id="stream_start")
+            if reply["state"] == "finished":
+                break
+            assert time.monotonic() < deadline
+            time.sleep(0.005)
+        result = reply["response"]["result"]
+        raw = result["raw_rx_log"]
+        assert reply["progress"]["raw_rx_log"] == raw
+        assert raw["path"] == str(directory / "rx.bin")
+        assert raw["bytes_written"] <= limit
+        assert result["success"] is False and result["cleanup_stop_ok"]
+        assert json.loads((directory / "stream_rx_meta.json").read_text())["raw_rx_log"] == raw
+        if mode.startswith("raw_"):
+            assert raw["error"] and result["error_code"] == "ARTIFACT_WRITE_ERROR"
+        elif limit == 100:
+            assert raw["truncated"] and raw["closed"] and raw["records"] == 0
+            assert (directory / "rx.bin").read_bytes() == b"DL16RX01"
+        else:
+            code = 6 if mode == "error_bytes" else 5 if mode == "usb_error" else 0
+            payload = b"" if mode == "usb_error" else bytes(range(256)) * 4
+            assert (directory / "rx.bin").read_bytes() == b"DL16RX01" + struct.pack("<II", len(payload), code) + payload
+            assert raw["closed"] and not raw["error"] and raw["records"] == 1
+            assert result["reason"] == ("USB_ERROR" if mode == "usb_error" else "SHORT_RX")
+        assert request("close")["ok"]
+        assert proc.wait(timeout=3) == 0
+    finally:
+        if proc.poll() is None:
+            proc.stdin.close()
+            proc.wait(timeout=3)
+        proc.stdout.close()
+        if not proc.stdin.closed:
+            proc.stdin.close()
+
+
+def test_stream_raw_old_worker_guard(monkeypatch):
+    from dl16_mcp.session import NativeSession, SessionFailure
+    session = NativeSession(Path("old.exe"))
+    monkeypatch.setattr(session, "_start", lambda: None)
+    session._hello = True
+    session.capabilities = {"experimental_stream_v1", "raw_rx_log_v1"}
+    monkeypatch.setattr(session, "_request_locked", lambda *a, **k: pytest.fail("must not send ignored flag"))
+    with pytest.raises(SessionFailure, match="Stream raw RX"):
+        session.request({"command": "stream_start", "raw_rx_logging": True}, timeout_s=1)
+
+
+def test_stream_raw_combined_budget_prelaunch(monkeypatch):
+    monkeypatch.setattr(backend, "find_native_cli", lambda: pytest.fail("must reject before launch"))
+    assert backend.stream_start(experimental_opt_in=True, safety_confirmation=CONFIRM,
+                                channels=[8, 14], sample_rate_hz=20_000_000, duration_ms=4500,
+                                raw_rx_logging=True)["error_code"] == "INVALID_STREAM"

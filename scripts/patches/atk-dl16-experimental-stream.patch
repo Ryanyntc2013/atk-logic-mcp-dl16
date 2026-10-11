@@ -5,7 +5,7 @@
          if(cmd=="hello"){
              int version=0;if(!session::get_integer(req,"protocol",version)||version!=1){emit(session::error_response(id,"UNSUPPORTED_PROTOCOL","protocol must equal 1"));continue;}
 -            emit(session::response(id,"\"ok\":true,\"protocol\":1,\"native_version\":\"1.0.0\",\"commands\":[\"status\",\"capture\",\"pwm\",\"close\",\"raw_rx_log_v1\",\"async_buffer_v1\"]"));continue;
-+            emit(session::response(id,"\"ok\":true,\"protocol\":1,\"native_version\":\"1.0.0\",\"commands\":[\"status\",\"capture\",\"pwm\",\"close\",\"raw_rx_log_v1\",\"async_buffer_v1\",\"experimental_stream_v1\"]"));continue;
++            emit(session::response(id,"\"ok\":true,\"protocol\":1,\"native_version\":\"1.0.0\",\"commands\":[\"status\",\"capture\",\"pwm\",\"close\",\"raw_rx_log_v1\",\"async_buffer_v1\",\"experimental_stream_v1\",\"experimental_stream_raw_rx_v1\"]"));continue;
          }
          if(cmd=="close") {
              bool cleanup_failed=false;
@@ -21,9 +21,9 @@
 +            try {
 +                auto observed=session::run_stream(cfg,directory,dispatcher->cancel,
 +                    [&](const std::vector<uint8_t>& f,int timeout){return static_cast<bool>(dev.transport().write_bulk(EP_BULK_OUT,f.data(),f.size(),timeout));},
-+                    [&](uint8_t* data,size_t size,size_t& n,int timeout){return static_cast<bool>(dev.transport().read_bulk(EP_BULK_IN,data,size,n,timeout));},"UNKNOWN",&dispatcher->stream_progress);
++                    [&](uint8_t* data,size_t size,size_t& n,int timeout){return dev.transport().read_bulk(EP_BULK_IN,data,size,n,timeout);},"UNKNOWN",&dispatcher->stream_progress);
 +                emit(session::response(id,session::stream_result(observed,directory)));
-+            } catch(const std::exception& e) {emit(session::error_response(id,"STREAM_WRITE_ERROR",e.what()));}
++            } catch(const std::exception& e) {emit(session::response(id,"\"ok\":false,\"error_code\":\"STREAM_WRITE_ERROR\",\"data_integrity\":\"INCOMPLETE\",\"message\":\""+json_escape(e.what())+"\",\"raw_rx_log\":"+dispatcher->stream_progress.raw_json()));}
 +            continue;
          }
          if(cmd!="status"&&cmd!="capture"&&cmd!="pwm"){emit(session::error_response(id,"UNKNOWN_COMMAND","unsupported command"));continue;}

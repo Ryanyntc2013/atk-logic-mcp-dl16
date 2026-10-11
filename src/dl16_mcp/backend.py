@@ -341,17 +341,21 @@ def close_session() -> dict[str, Any]:
 
 def stream_start(*, experimental_opt_in: bool = False, safety_confirmation: str = "",
                  channels: list[int] | None = None, sample_rate_hz: int = 20_000_000,
-                 duration_ms: int = 20, threshold_voltage: float = 1.6) -> dict[str, Any]:
+                 duration_ms: int = 20, threshold_voltage: float = 1.6,
+                       raw_rx_logging: bool = False, raw_rx_max_bytes: int = 33_554_432) -> dict[str, Any]:
     """Experimental uncropped Stream; never returns trusted waveform data."""
     if experimental_opt_in is not True:
         return {"success": False, "error_code": "EXPERIMENTAL_OPT_IN_REQUIRED", "stream_available": False}
     try:
         if safety_confirmation != "CONFIRMED_SAFE_WIRING_GUI_CLOSED":
             raise ValueError("Explicit safe wiring/threshold and GUI-closed confirmation required")
+        if type(raw_rx_logging) is not bool or type(raw_rx_max_bytes) is not int or not 8 <= raw_rx_max_bytes <= 33_554_432:
+            raise ValueError("Invalid bounded raw RX logging configuration")
+        raw_budget = raw_rx_max_bytes if raw_rx_logging else 0
         request = CaptureRequest(tuple(channels or []), sample_rate_hz, duration_ms, threshold_voltage)
         request.validate()
         if (len(request.channels) > 2 or sample_rate_hz not in (1_000_000, 2_000_000, 4_000_000, 5_000_000, 10_000_000, 20_000_000)
-                or duration_ms > 30_000 or ((sample_rate_hz * duration_ms // 1000 + 7) // 8) * 16 + 1_048_576 > 200 * 1024 * 1024):
+                or duration_ms > 30_000 or ((sample_rate_hz * duration_ms // 1000 + 7) // 8) * 16 + 1_048_576 + raw_budget > 200 * 1024 * 1024):
             raise ValueError("Experimental Stream exceeds all16 budget/rate/duration bounds")
         if not _session_enabled():
             raise ValueError("Experimental Stream requires DL16_BACKEND_MODE=session")
@@ -363,7 +367,8 @@ def stream_start(*, experimental_opt_in: bool = False, safety_confirmation: str 
         return _get_session(cli).request({"command": "stream_start", "experimental_opt_in": True,
             "safety_confirmation": safety_confirmation, "channels": list(request.channels),
             "sample_rate_hz": sample_rate_hz, "duration_ms": duration_ms,
-            "threshold_voltage": threshold_voltage, "output_dir": str(directory.resolve())}, timeout_s=5)
+            "threshold_voltage": threshold_voltage, "output_dir": str(directory.resolve()),
+            **({"raw_rx_logging": True, "raw_rx_max_bytes": raw_rx_max_bytes} if raw_rx_logging else {})}, timeout_s=5)
     except (ValueError, SessionFailure) as exc:
         return {"success": False, "error_code": getattr(exc, "code", "INVALID_STREAM"), "message": str(exc)}
 
