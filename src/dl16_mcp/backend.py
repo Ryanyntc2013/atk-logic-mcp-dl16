@@ -169,6 +169,10 @@ def capture(request: CaptureRequest, timeout_s: float = 45.0,
             raise ValueError("trigger_position_percent must be within [0, 100]")
         if trigger_timeout_sec is not None and not 1 <= trigger_timeout_sec <= 3600:
             raise ValueError("trigger_timeout_sec must be from 1 to 3600")
+        # An explicit device wait must fit inside the host deadline with transfer/cleanup slack.
+        if (request.trigger != "immediate" and trigger_timeout_sec is not None
+                and timeout_s <= trigger_timeout_sec + request.duration_ms / 1000 + 5):
+            raise ValueError("Host timeout must exceed trigger wait + capture duration + 5s cleanup margin")
     except (ValueError, TypeError) as exc:
         return {"success": False, "error_code": "INVALID_CAPTURE_CONFIG", "message": str(exc),
                 "data_integrity": "UNKNOWN", "evidence_source": "NONE"}
