@@ -105,6 +105,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Incremental writer patch check failed' }
 git -C $Dst apply $WriterPatch
 if ($LASTEXITCODE -ne 0) { throw 'Incremental writer patch apply failed' }
 
+# TASK-057 publishes atomic progress from owner-only IO; deadlines and per-chunk flush stay unchanged.
 Copy-Item -LiteralPath (Join-Path $RepoRoot 'scripts\experimental_stream.h') -Destination (Join-Path $Dst 'cli\experimental_stream.h') -Force
 $StreamPatch = Join-Path $RepoRoot 'scripts\patches\atk-dl16-experimental-stream.patch'
 git -C $Dst apply --check $StreamPatch

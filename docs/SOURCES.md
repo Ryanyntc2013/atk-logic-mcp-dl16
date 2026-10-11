@@ -1,5 +1,19 @@
 # Upstream provenance and reuse matrix (2026-10-10)
 
+## TASK-057 Stream progress and measured IO provenance
+
+Independently authored atomic owner-publication counters and steady-clock IO
+instrumentation extend TASK055/TASK050 pinned CPP integration. No third-party
+code copied or translated; no new protocol command or receive deadline/flush
+policy. Actual production parser/writer/dispatcher tested using explicitly
+SYNTHETIC_OFFLINE transport. TASK056552704B parent receive is prior physical
+observation, not a sustained-throughput claim. Elapsed ns excludes metadata IO,
+conversion and close; file flush is not power-loss durability. Child HIL_NOT_RUN;
+parent-only single1MHz<=1s cancellation-after-positive-progress gate is proposed,
+not executed or validated. See [TASK057](tasks/DL16-TASK-057-stream-progress.md)
+for exact builds/tests/hash and ownership/poll bounds. UNKNOWN tails and sample
+validity remain unchanged.
+
 ## TASK-055 experimental Stream provenance
 
 Independently authored `scripts/experimental_stream.h` and tracked native owner

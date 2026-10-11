@@ -19,6 +19,7 @@ class AsyncDispatcher {
     std::string operation_, result_;
     bool stream_operation_{false};
 public:
+    StreamProgress stream_progress;
     std::atomic<bool> cancel{false};
     std::atomic<bool> closing{false};
     explicit AsyncDispatcher(std::function<void(const std::string&)> output) : output_(output) {}
@@ -41,6 +42,7 @@ public:
             if((cmd.rfind("stream_",0)==0)!=stream_operation_) {lock.unlock();output(error_response(id,"UNKNOWN_OPERATION","wrong operation kind"));return;}
             if((cmd=="capture_cancel" || cmd=="stream_cancel") && active_) cancel.store(true);
             std::string fields="\"ok\":true,\"operation_id\":\""+json_escape(op)+"\",\"state\":\""+(active_?"running":"finished")+"\"";
+            if(stream_operation_) fields+=",\"progress\":{"+stream_progress.json()+"}";
             if(!active_ && !result_.empty()) fields+=",\"response\":"+result_;
             lock.unlock(); output(response(id,fields)); return;
         }
@@ -48,6 +50,7 @@ public:
             CaptureConfig cfg; std::string directory;
             if(!stream_config(req,cfg,directory)) {lock.unlock();output(error_response(id,"INVALID_STREAM","experimental Stream needs explicit opt-in, safe wiring confirmation and bounded all16 budget"));return;}
             if(active_ || !queue_.empty()) {lock.unlock();output(error_response(id,"SESSION_BUSY","owner is busy"));return;}
+            stream_progress.reset();
             active_=true;stream_operation_=true;cancel.store(false);operation_=id;result_.clear();queue_.push_back(line);ready_.notify_one();
             lock.unlock();output(response(id,"\"ok\":true,\"operation_id\":\""+json_escape(id)+"\",\"state\":\"running\",\"experimental\":true"));return;
         }

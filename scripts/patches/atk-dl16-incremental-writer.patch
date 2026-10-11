@@ -2,11 +2,12 @@ diff --git a/core/include/atkdl16/incremental_packed_writer.h b/core/include/atk
 new file mode 100644
 --- /dev/null
 +++ b/core/include/atkdl16/incremental_packed_writer.h
-@@ -0,0 +1,119 @@
+@@ -0,0 +1,129 @@
 +#pragma once
 +#include <algorithm>
 +#include <array>
 +#include <cstdint>
++#include <chrono>
 +#include <filesystem>
 +#include <fstream>
 +#include <stdexcept>
@@ -26,6 +27,7 @@ new file mode 100644
 +    std::array<std::ofstream, 16> files_;
 +    std::array<uint64_t, 16> bytes_{};
 +    uint64_t requested_, rate_, budget_, total_{0};
++    uint64_t write_ns_{0}, flush_ns_{0};
 +    bool closed_{false};
 +    std::string evidence_, reason_{"ACTIVE_UNVERIFIED"};
 +    void metadata() {
@@ -78,6 +80,8 @@ new file mode 100644
 +    IncrementalPackedWriter(const IncrementalPackedWriter&) = delete;
 +    IncrementalPackedWriter& operator=(const IncrementalPackedWriter&) = delete;
 +    uint64_t total_bytes() const { return total_; }
++    uint64_t write_elapsed_ns() const { return write_ns_; }
++    uint64_t flush_elapsed_ns() const { return flush_ns_; }
 +    void append(unsigned ch, const uint8_t* data, size_t length) {
 +        if (closed_) throw std::runtime_error("writer closed");
 +        if (std::find(channels_.begin(), channels_.end(), ch) == channels_.end() ||
@@ -88,8 +92,12 @@ new file mode 100644
 +            throw std::runtime_error("packed byte cap reached");
 +        }
 +        if (!length) return;
++        const auto write_start=std::chrono::steady_clock::now();
 +        files_[ch].write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(length));
++        write_ns_+=static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now()-write_start).count());
++        const auto flush_start=std::chrono::steady_clock::now();
 +        files_[ch].flush();
++        flush_ns_+=static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now()-flush_start).count());
 +        if (!files_[ch]) {
 +            finish("WRITE_ERROR");
 +            throw std::runtime_error("packed write/flush failed");
@@ -108,7 +116,9 @@ new file mode 100644
 +        reason_ = reason;
 +        bool failed = false;
 +        for (unsigned ch : channels_) {
++            const auto flush_start=std::chrono::steady_clock::now();
 +            files_[ch].flush();
++            flush_ns_+=static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now()-flush_start).count());
 +            failed = failed || !files_[ch];
 +            files_[ch].close();
 +            failed = failed || files_[ch].fail();

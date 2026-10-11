@@ -1,3 +1,17 @@
+# Latest continuation ? TASK-057, 2026-10-11
+
+DONE offline / NEEDS_HUMAN_HIL; HIL_NOT_RUN, no hardware/no commit. Stream poll
+now exposes bounded atomic actual stored-byte/read progress while running and
+measured receive/packed-write/packed-flush elapsed ns; owner-only IO, host unchanged.
+Per-chunk flush and existing deadlines/caps unchanged, no throughput or COMPLETE
+claim. Actual native integration cancels once after >=64B running progress,
+checks bounded partial artifacts/cleanup plus EOF,busy,error,metadata/Stop failures
+and counter reset. Final **37 targeted /297 full passed**, compileall,ruff,diff-check
+passed; tracked native bootstrap -SkipTests and harness builds passed. Parent only:
+ONE1MHz/1000ms capture,<=200 polls/3s,one explicit cancel at first running >0B;
+no retries. Exact commands/hash/limitations:
+[tasks/DL16-TASK-057-stream-progress.md](tasks/DL16-TASK-057-stream-progress.md).
+
 # Latest continuation ? TASK-055, 2026-10-11
 
 DONE offline implementation / NEEDS_HUMAN_HIL. Actual opt-in experimental native
@@ -373,3 +387,5 @@ After this task's physical gate-0/1 evidence (or in parallel for **offline-only*
 
 
 TASK-056 parent normal experimental Stream:20MHz/100ms CH8/14, no PWM change;552704 packed bytes retained, ACK observed, DEADLINE/no Order6, no shorts, Stop fields true and close success. Evidence artifacts/hil/DL16-TASK-056. INCOMPLETE/UNKNOWN unchanged; not sustained throughput or trusted waveform certification. Next bounded gate cancellation after data and profiling incremental flush/backpressure, not deadline extension to force completion.
+
+TASK057 added atomic Stream progress/profiling;297offline tests passed. Parent1MHz/1000ms gate stopped SHORT_RX(1024bytes) after65024packed bytes, before cancel dispatch;Stop/close succeeded. No retry or completeness promotion. Next: preserve short-read raw evidence and validate mode-specific handling; cancellation-after-data still unaccepted.

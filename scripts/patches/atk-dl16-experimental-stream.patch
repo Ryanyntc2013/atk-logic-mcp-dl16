@@ -21,7 +21,7 @@
 +            try {
 +                auto observed=session::run_stream(cfg,directory,dispatcher->cancel,
 +                    [&](const std::vector<uint8_t>& f,int timeout){return static_cast<bool>(dev.transport().write_bulk(EP_BULK_OUT,f.data(),f.size(),timeout));},
-+                    [&](uint8_t* data,size_t size,size_t& n,int timeout){return static_cast<bool>(dev.transport().read_bulk(EP_BULK_IN,data,size,n,timeout));});
++                    [&](uint8_t* data,size_t size,size_t& n,int timeout){return static_cast<bool>(dev.transport().read_bulk(EP_BULK_IN,data,size,n,timeout));},"UNKNOWN",&dispatcher->stream_progress);
 +                emit(session::response(id,session::stream_result(observed,directory)));
 +            } catch(const std::exception& e) {emit(session::error_response(id,"STREAM_WRITE_ERROR",e.what()));}
 +            continue;

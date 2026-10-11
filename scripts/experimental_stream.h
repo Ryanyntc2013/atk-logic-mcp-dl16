@@ -27,21 +27,40 @@ inline bool stream_config(const Value& req, CaptureConfig& cfg, std::string& out
     cfg.duration_ms=ms; cfg.threshold_voltage=threshold; cfg.trigger.is_instantly=true;
     cfg.trigger.position_percent=0; return true;
 }
+struct StreamProgress {
+    std::atomic<uint64_t> stored_bytes{0}, reads{0}, receive_elapsed_ns{0}, packed_write_elapsed_ns{0}, packed_flush_elapsed_ns{0};
+    void reset() { stored_bytes.store(0); reads.store(0); receive_elapsed_ns.store(0); packed_write_elapsed_ns.store(0); packed_flush_elapsed_ns.store(0); }
+    std::string json() const {
+        return "\"stored_bytes\":"+std::to_string(stored_bytes.load())+",\"reads\":"+std::to_string(reads.load())+",\"receive_elapsed_ns\":"+std::to_string(receive_elapsed_ns.load())+",\"packed_write_elapsed_ns\":"+std::to_string(packed_write_elapsed_ns.load())+",\"packed_flush_elapsed_ns\":"+std::to_string(packed_flush_elapsed_ns.load());
+    }
+};
 struct StreamObservation {
     std::string reason{"DEADLINE"}, order3_hex;
     uint64_t stored_bytes=0, short_bytes=0, order6=0, reads=0;
+    uint64_t receive_elapsed_ns=0, packed_write_elapsed_ns=0, packed_flush_elapsed_ns=0;
     bool ack=false, stop_ok=false;
 };
 // Same receive/storage/control loop in live owner and USB-free injected-transport tests.
 template<class Send, class Read>
 StreamObservation run_stream(const CaptureConfig& cfg, const std::string& directory,
                              std::atomic<bool>& cancel, Send send, Read read,
-                             const std::string& evidence="UNKNOWN") {
+                             const std::string& evidence="UNKNOWN", StreamProgress* progress=nullptr) {
     std::vector<unsigned> channels; for(unsigned ch=0;ch<16;++ch) channels.push_back(ch);
     IncrementalPackedWriter writer(std::filesystem::u8path(directory),channels,cfg.sample_rate,
                                    static_cast<unsigned>(cfg.duration_ms),evidence,
                                    IncrementalPackedWriter::max_bytes-1048576,true);
     StreamObservation result;
+    auto publish=[&] {
+        result.stored_bytes=writer.total_bytes();
+        result.packed_write_elapsed_ns=writer.write_elapsed_ns();
+        result.packed_flush_elapsed_ns=writer.flush_elapsed_ns();
+        if(progress) {
+            progress->reads.store(result.reads); progress->receive_elapsed_ns.store(result.receive_elapsed_ns);
+            progress->packed_write_elapsed_ns.store(result.packed_write_elapsed_ns);
+            progress->packed_flush_elapsed_ns.store(result.packed_flush_elapsed_ns);
+            progress->stored_bytes.store(result.stored_bytes);
+        }
+    };
     try {
         if(cancel.load()) result.reason="CANCELLED";
         else {
@@ -55,8 +74,10 @@ StreamObservation run_stream(const CaptureConfig& cfg, const std::string& direct
                 while(!cancel.load()) {
                     auto remaining=std::chrono::duration_cast<std::chrono::milliseconds>(end-std::chrono::steady_clock::now()).count();
                     if(remaining<=0) break;
+                    const auto receive_start=std::chrono::steady_clock::now();
                     size_t n=0; bool ok=read(input.data(),input.size(),n,static_cast<int>(std::min<int64_t>(remaining,10)));
-                    ++result.reads;
+                    result.receive_elapsed_ns+=static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now()-receive_start).count());
+                    ++result.reads; publish();
                     if(n>input.size()) throw std::runtime_error("invalid RX size");
                     size_t aligned=n/2048*2048; result.short_bytes+=n-aligned;
                     if(n!=aligned) {result.reason="SHORT_RX";break;}
@@ -67,6 +88,7 @@ StreamObservation run_stream(const CaptureConfig& cfg, const std::string& direct
                                 auto p=RxParser::parse_channel_data(*m,false);
                                 if(!p || p->channel_id>=16) throw std::runtime_error("invalid channel");
                                 writer.append(p->channel_id,p->data.data(),p->data.size());
+                                publish();
                             } else if(m->type==RxMessageType::TriggerOffset) {
                                 if(m->payload.size()>256) throw std::runtime_error("order3 exceeds diagnostic bound");
                                 static const char* digits="0123456789abcdef"; result.order3_hex.clear();
@@ -82,12 +104,14 @@ StreamObservation run_stream(const CaptureConfig& cfg, const std::string& direct
             }
         }
     } catch(const std::exception& e) {result.reason=std::string(e.what())=="packed byte cap reached"?"BYTE_CAP":"OWNER_ERROR";}
-    result.stop_ok=send(build_stop_frame(),50);
+    try { result.stop_ok=send(build_stop_frame(),50); } catch(...) { result.stop_ok=false; }
     result.stored_bytes=writer.total_bytes();
+    publish();
     writer.finish(result.reason);
+    publish();
     return result;
 }
 inline std::string stream_result(const StreamObservation& r,const std::string& directory) {
-    return "\"ok\":true,\"result\":{\"success\":false,\"experimental\":true,\"mode\":\"STREAM\",\"data_integrity\":\"INCOMPLETE\",\"tail_status\":\"UNKNOWN\",\"analysis_ready\":false,\"valid_sample_count\":null,\"reason\":\""+r.reason+"\",\"stored_bytes\":"+std::to_string(r.stored_bytes)+",\"short_bytes\":"+std::to_string(r.short_bytes)+",\"order6_count\":"+std::to_string(r.order6)+",\"order3_raw_hex\":\""+r.order3_hex+"\",\"trigger_ack_received\":"+(r.ack?"true":"false")+",\"cleanup_stop_attempted\":true,\"cleanup_stop_ok\":"+(r.stop_ok?"true":"false")+",\"artifact_directory\":\""+json_escape(directory)+"\"}";
+    return "\"ok\":true,\"result\":{\"success\":false,\"experimental\":true,\"mode\":\"STREAM\",\"data_integrity\":\"INCOMPLETE\",\"tail_status\":\"UNKNOWN\",\"analysis_ready\":false,\"valid_sample_count\":null,\"reason\":\""+r.reason+"\",\"stored_bytes\":"+std::to_string(r.stored_bytes)+",\"reads\":"+std::to_string(r.reads)+",\"receive_elapsed_ns\":"+std::to_string(r.receive_elapsed_ns)+",\"packed_write_elapsed_ns\":"+std::to_string(r.packed_write_elapsed_ns)+",\"packed_flush_elapsed_ns\":"+std::to_string(r.packed_flush_elapsed_ns)+",\"short_bytes\":"+std::to_string(r.short_bytes)+",\"order6_count\":"+std::to_string(r.order6)+",\"order3_raw_hex\":\""+r.order3_hex+"\",\"trigger_ack_received\":"+(r.ack?"true":"false")+",\"cleanup_stop_attempted\":true,\"cleanup_stop_ok\":"+(r.stop_ok?"true":"false")+",\"artifact_directory\":\""+json_escape(directory)+"\"}";
 }
 }
