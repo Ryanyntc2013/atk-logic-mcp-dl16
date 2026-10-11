@@ -157,13 +157,32 @@ def logic_filter(capture_id: str, channel: int, min_pulse_samples: int,
         filtered, removed = glitch_filter(wave.raw, wave.samples,
                                           min_pulse_samples=min_pulse_samples)
         original = wave.metadata
+        other_channels = []
+        # Buffer captures use one common sample clock; preserve other channels
+        # unchanged when deriving a filtered channel for multi-channel analysis.
+        if not atkdl_file:
+            source_counts = original.get("sample_counts", {})
+            if isinstance(source_counts, dict):
+                for key, count in source_counts.items():
+                    other_ch = int(key)
+                    if not 0 <= other_ch <= 15:
+                        raise ValueError("Invalid source channel metadata")
+                    if other_ch == channel:
+                        continue
+                    count = int(count)
+                    source_path = captures_dir() / capture_id / f"ch{other_ch:02d}.bits"
+                    if count != wave.samples or count <= 0 or source_path.stat().st_size * 8 < count:
+                        raise ValueError(f"Unaligned or missing source channel {other_ch}")
+                    other_channels.append((other_ch, count, source_path))
         meta = {
             "capture_id": new_id,
             "derived_from": str(wave.metadata.get("archive_path", atkdl_file)) if atkdl_file else capture_id,
             "transform": "glitch_filter", "processing_status": "COMPLETE",
             "min_pulse_samples": min_pulse_samples, "channel": channel,
             "sample_rate": wave.sample_rate_hz, "requested_samples": wave.samples,
-            "sample_counts": {str(channel): wave.samples},
+            "sample_counts": {str(channel): wave.samples,
+                              **{str(ch): count for ch, count, _ in other_channels}},
+            "preserved_channels": sorted([channel, *[ch for ch, _, _ in other_channels]]),
             "data_integrity": wave.integrity if wave.integrity == "COMPLETE" else "UNVERIFIED",
             # These describe the source acquisition, not the success of filtering.
             "capture_complete_received": bool(original.get("capture_complete_received", False)),
@@ -175,6 +194,9 @@ def logic_filter(capture_id: str, channel: int, min_pulse_samples: int,
         folder.mkdir(parents=False, exist_ok=False)
         try:
             (folder / f"ch{channel:02d}.bits").write_bytes(filtered)
+            from shutil import copyfile
+            for ch, _, source_path in other_channels:
+                copyfile(source_path, folder / f"ch{ch:02d}.bits")
             # Publish metadata LAST; an interrupted write cannot be mistaken for complete.
             (folder / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
         except BaseException:
