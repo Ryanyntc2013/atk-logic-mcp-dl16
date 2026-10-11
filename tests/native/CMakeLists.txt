@@ -26,6 +26,15 @@ target_link_libraries(dl16-vector-dump PRIVATE
     Advapi32
 )
 
+# Internal opt-in Stream evidence probe; --self-test never constructs Device.
+add_executable(dl16-stream-evidence stream_evidence.cpp)
+target_include_directories(dl16-stream-evidence PRIVATE "${UP}/core/include" "${UP}/cli")
+target_link_libraries(dl16-stream-evidence PRIVATE
+    "${UP}/build/Release/atkdl16_core.lib"
+    "${UP}/third_party/libusb/VS2022/MS64/dll/libusb-1.0.lib" Advapi32)
+add_custom_command(TARGET dl16-stream-evidence POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${UP}/third_party/libusb/VS2022/MS64/dll/libusb-1.0.dll" "$<TARGET_FILE_DIR:dl16-stream-evidence>")
+
 add_executable(dl16-incremental-writer-test incremental_writer_test.cpp)
 target_include_directories(dl16-incremental-writer-test PRIVATE "${UP}/core/include" "${UP}/cli" "${CMAKE_CURRENT_SOURCE_DIR}/../../scripts")
 target_link_libraries(dl16-incremental-writer-test PRIVATE "${UP}/build/Release/atkdl16_core.lib")

@@ -9,6 +9,7 @@ on:
       - 'scripts/patches/**'
       - 'scripts/async_dispatcher.h'
       - 'tests/test_async_buffer.py'
+      - 'tests/test_stream_evidence.py'
       - 'tests/test_incremental_writer.py'
       - 'external/ATK-Logic-Mcp/cli/session_protocol.h'
       - 'external/ATK-Logic-Mcp/tests/unit/test_main.cpp'
@@ -82,4 +83,4 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install -e '.[dev]'
-          python -m pytest -q tests/test_protocol_vectors.py tests/test_raw_rx_logging.py tests/test_async_buffer.py tests/test_incremental_writer.py
+          python -m pytest -q tests/test_protocol_vectors.py tests/test_raw_rx_logging.py tests/test_async_buffer.py tests/test_incremental_writer.py tests/test_stream_evidence.py tests/test_task051_observation.py

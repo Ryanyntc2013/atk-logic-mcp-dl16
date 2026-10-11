@@ -1,3 +1,29 @@
+# TASK-051 parent evidence follow-up — 2026-10-11
+
+Parent corrected `stream-02` captured all16 channel payloads50016 bytes each,
+requested400000 samples,74 aligned reads,Order3 offset22/count fields25001 each,
+three Order6 packets in final read. Native replay and independent Python reference
+reconstruct original packed files byte-for-byte;16 trailing AA bytes observed on
+all channels. All16 is source-consistent possibility, NOT verified channel-selection
+semantics. No crop/completeness rule or public Stream gate opened. CH8/14 interior
+stored periods20000/10000 are nominal PWM-consistent only; alignment UNKNOWN.
+Original stream-01 failure and stream-02 evidence preserved. Versioned observation,
+read-only reproducer and archive/profile regressions added; offline focused12 passed.
+Next gate: model-specific Order3 units, tails and all16 bandwidth contract before
+any separately approved further HIL. See TASK-051 report for exact evidence/counts.
+
+# Latest continuation — TASK-051, 2026-10-11
+
+Parent-ready **internal opt-in diagnostic** `tests/native/build/Release/dl16-stream-evidence.exe`
+now sends documented Stream parameters, fixed safe existing CH8/CH14 1.6V with
+PWM0 1kHz/PWM1 2kHz 50%, immediate/noRLE. <=100ms depth and receive deadline,
+<=20MHz, <=32MiB whole-read framed raw cap, all actual channel bytes/order3/order6
+retained uncropped UNKNOWN. Single Device owner, stop/PWM-stop cleanup. No public
+Stream integration or COMPLETE promotion. Child OFFLINE ONLY: **271 passed**,
+compileall passed, smallest harness built; no hardware/no commit. Parent must review
+exact invocation/standard Device lifecycle caveat and stop bounds in
+`tasks/DL16-TASK-051-stream-evidence-probe.md` before one diagnostic.
+
 # Latest continuation — TASK-050, 2026-10-11
 
 Offline native incremental packed storage foundation DONE; **live Stream BLOCKED**

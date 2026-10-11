@@ -1,5 +1,27 @@
 # Upstream provenance and reuse matrix (2026-10-10)
 
+## TASK-051 parent Stream observation provenance
+
+`tests/vectors/task051-stream-observation-v1.json` stores sanitized exact counts,
+metadata fragments and hashes from parent-provided stream-02; UNKNOWN alignment,
+tails and validity. Native replay and independently authored existing Python
+reference reconstruct all16 channels exactly,50016 bytes each, including16 AA
+suffix bytes; this differs from approximate LHX ~8-byte Stream report. All16
+matches a prior HUGEL source-reported possibility, not a verified selection rule.
+No copying from LHX, no tail removal, no HIL_PASS or public Stream promotion.
+`tests/task051_observation.py` only reads bounded archives; child ran offline only.
+
+## TASK-051 internal Stream evidence probe
+
+`tests/native/stream_evidence.cpp` is independently authored against pinned CPP
+`5fc47744c18c99f9ad0f554a965eb8cd1160c836` public Device/transport, parameter/trigger/
+Stop builders, RxParser and TASK-047 RawRxWriter. Uses documented Stream mode flag
+(clear Buffer/RLE bits), immediate existing 9-byte trigger and existing PWM helper.
+No LHX code copied/translated; TASK-002 R4 approximate tails remain REPORTED_HIL,
+not a stripping contract. All received payload bytes retained, UNKNOWN uncropped
+artifacts, no public Stream integration/capability or COMPLETE promotion. See
+[TASK-051 bounds and parent invocation](tasks/DL16-TASK-051-stream-evidence-probe.md).
+
 ## TASK-050 incremental packed storage boundary
 
 Independently authored native storage header is persisted as the tracked bootstrap

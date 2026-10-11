@@ -1,0 +1,532 @@
+{
+  "schema": "task051-stream-observation/v1",
+  "data_integrity": "UNKNOWN",
+  "alignment_status": "UNKNOWN",
+  "tail_status": "UNKNOWN",
+  "raw_sha256": "14344a2eab2c2acdd01966e1bccbd90a7ca7c81b6d732dc378affe6e7fa9c824",
+  "raw_bytes": 1213016,
+  "records": 74,
+  "read_sizes": {
+    "16384": 74
+  },
+  "status_codes": {
+    "0": 74
+  },
+  "orders": {
+    "2": 187,
+    "4": 1,
+    "3": 1,
+    "1": 400,
+    "6": 3
+  },
+  "events": [
+    {
+      "record": 1,
+      "order": 4,
+      "payload_hex": "ff001203"
+    },
+    {
+      "record": 2,
+      "order": 3,
+      "payload_hex": "ff001600000000a961000000a961000000a961000000a961000000a961000000a961000000a961000000a961000000a961000000a961000000a961000000a961000000a961000000a961000000a961000000a96100000000"
+    },
+    {
+      "record": 74,
+      "order": 6,
+      "payload_hex": "ff0000"
+    },
+    {
+      "record": 74,
+      "order": 6,
+      "payload_hex": "ff0000"
+    },
+    {
+      "record": 74,
+      "order": 6,
+      "payload_hex": "ff0000"
+    }
+  ],
+  "desync_count": 405276,
+  "channels": [
+    {
+      "channel": 0,
+      "payload_bytes": 50016,
+      "sha256": "6aa7f2d0acb4386a7832fbce8454006cd3ae197363aa05e0c15d08ab71709e5e",
+      "packet_sizes": {
+        "2032": 24,
+        "1248": 1
+      },
+      "first16_hex": "00000000000000000000000000000000",
+      "last32_hex": "00000000000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "stored_rising_count": 64,
+      "stored_rising_first": [
+        400001,
+        400003,
+        400005,
+        400007
+      ],
+      "stored_rising_last": [
+        400121,
+        400123,
+        400125,
+        400127
+      ],
+      "stored_rising_deltas": {
+        "2": 63
+      },
+      "valid_sample_count": null
+    },
+    {
+      "channel": 1,
+      "payload_bytes": 50016,
+      "sha256": "6aa7f2d0acb4386a7832fbce8454006cd3ae197363aa05e0c15d08ab71709e5e",
+      "packet_sizes": {
+        "2032": 24,
+        "1248": 1
+      },
+      "first16_hex": "00000000000000000000000000000000",
+      "last32_hex": "00000000000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "stored_rising_count": 64,
+      "stored_rising_first": [
+        400001,
+        400003,
+        400005,
+        400007
+      ],
+      "stored_rising_last": [
+        400121,
+        400123,
+        400125,
+        400127
+      ],
+      "stored_rising_deltas": {
+        "2": 63
+      },
+      "valid_sample_count": null
+    },
+    {
+      "channel": 2,
+      "payload_bytes": 50016,
+      "sha256": "6aa7f2d0acb4386a7832fbce8454006cd3ae197363aa05e0c15d08ab71709e5e",
+      "packet_sizes": {
+        "2032": 24,
+        "1248": 1
+      },
+      "first16_hex": "00000000000000000000000000000000",
+      "last32_hex": "00000000000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "stored_rising_count": 64,
+      "stored_rising_first": [
+        400001,
+        400003,
+        400005,
+        400007
+      ],
+      "stored_rising_last": [
+        400121,
+        400123,
+        400125,
+        400127
+      ],
+      "stored_rising_deltas": {
+        "2": 63
+      },
+      "valid_sample_count": null
+    },
+    {
+      "channel": 3,
+      "payload_bytes": 50016,
+      "sha256": "6aa7f2d0acb4386a7832fbce8454006cd3ae197363aa05e0c15d08ab71709e5e",
+      "packet_sizes": {
+        "2032": 24,
+        "1248": 1
+      },
+      "first16_hex": "00000000000000000000000000000000",
+      "last32_hex": "00000000000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "stored_rising_count": 64,
+      "stored_rising_first": [
+        400001,
+        400003,
+        400005,
+        400007
+      ],
+      "stored_rising_last": [
+        400121,
+        400123,
+        400125,
+        400127
+      ],
+      "stored_rising_deltas": {
+        "2": 63
+      },
+      "valid_sample_count": null
+    },
+    {
+      "channel": 4,
+      "payload_bytes": 50016,
+      "sha256": "6aa7f2d0acb4386a7832fbce8454006cd3ae197363aa05e0c15d08ab71709e5e",
+      "packet_sizes": {
+        "2032": 24,
+        "1248": 1
+      },
+      "first16_hex": "00000000000000000000000000000000",
+      "last32_hex": "00000000000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "stored_rising_count": 64,
+      "stored_rising_first": [
+        400001,
+        400003,
+        400005,
+        400007
+      ],
+      "stored_rising_last": [
+        400121,
+        400123,
+        400125,
+        400127
+      ],
+      "stored_rising_deltas": {
+        "2": 63
+      },
+      "valid_sample_count": null
+    },
+    {
+      "channel": 5,
+      "payload_bytes": 50016,
+      "sha256": "6aa7f2d0acb4386a7832fbce8454006cd3ae197363aa05e0c15d08ab71709e5e",
+      "packet_sizes": {
+        "2032": 24,
+        "1248": 1
+      },
+      "first16_hex": "00000000000000000000000000000000",
+      "last32_hex": "00000000000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "stored_rising_count": 64,
+      "stored_rising_first": [
+        400001,
+        400003,
+        400005,
+        400007
+      ],
+      "stored_rising_last": [
+        400121,
+        400123,
+        400125,
+        400127
+      ],
+      "stored_rising_deltas": {
+        "2": 63
+      },
+      "valid_sample_count": null
+    },
+    {
+      "channel": 6,
+      "payload_bytes": 50016,
+      "sha256": "6aa7f2d0acb4386a7832fbce8454006cd3ae197363aa05e0c15d08ab71709e5e",
+      "packet_sizes": {
+        "2032": 24,
+        "1248": 1
+      },
+      "first16_hex": "00000000000000000000000000000000",
+      "last32_hex": "00000000000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "stored_rising_count": 64,
+      "stored_rising_first": [
+        400001,
+        400003,
+        400005,
+        400007
+      ],
+      "stored_rising_last": [
+        400121,
+        400123,
+        400125,
+        400127
+      ],
+      "stored_rising_deltas": {
+        "2": 63
+      },
+      "valid_sample_count": null
+    },
+    {
+      "channel": 7,
+      "payload_bytes": 50016,
+      "sha256": "6aa7f2d0acb4386a7832fbce8454006cd3ae197363aa05e0c15d08ab71709e5e",
+      "packet_sizes": {
+        "2032": 24,
+        "1248": 1
+      },
+      "first16_hex": "00000000000000000000000000000000",
+      "last32_hex": "00000000000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "stored_rising_count": 64,
+      "stored_rising_first": [
+        400001,
+        400003,
+        400005,
+        400007
+      ],
+      "stored_rising_last": [
+        400121,
+        400123,
+        400125,
+        400127
+      ],
+      "stored_rising_deltas": {
+        "2": 63
+      },
+      "valid_sample_count": null
+    },
+    {
+      "channel": 8,
+      "payload_bytes": 50016,
+      "sha256": "2d52babee21fa53e0b18a21eb77c452474bc4b94d7a3635974c36658fb0054a5",
+      "packet_sizes": {
+        "2032": 24,
+        "1248": 1
+      },
+      "first16_hex": "ffff3f00000000000000000000000000",
+      "last32_hex": "ffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "stored_rising_count": 84,
+      "stored_rising_first": [
+        10022,
+        30022,
+        50022,
+        70022
+      ],
+      "stored_rising_last": [
+        400121,
+        400123,
+        400125,
+        400127
+      ],
+      "stored_rising_deltas": {
+        "20000": 19,
+        "9979": 1,
+        "2": 63
+      },
+      "valid_sample_count": null
+    },
+    {
+      "channel": 9,
+      "payload_bytes": 50016,
+      "sha256": "6aa7f2d0acb4386a7832fbce8454006cd3ae197363aa05e0c15d08ab71709e5e",
+      "packet_sizes": {
+        "2032": 24,
+        "1248": 1
+      },
+      "first16_hex": "00000000000000000000000000000000",
+      "last32_hex": "00000000000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "stored_rising_count": 64,
+      "stored_rising_first": [
+        400001,
+        400003,
+        400005,
+        400007
+      ],
+      "stored_rising_last": [
+        400121,
+        400123,
+        400125,
+        400127
+      ],
+      "stored_rising_deltas": {
+        "2": 63
+      },
+      "valid_sample_count": null
+    },
+    {
+      "channel": 10,
+      "payload_bytes": 50016,
+      "sha256": "6aa7f2d0acb4386a7832fbce8454006cd3ae197363aa05e0c15d08ab71709e5e",
+      "packet_sizes": {
+        "2032": 24,
+        "1248": 1
+      },
+      "first16_hex": "00000000000000000000000000000000",
+      "last32_hex": "00000000000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "stored_rising_count": 64,
+      "stored_rising_first": [
+        400001,
+        400003,
+        400005,
+        400007
+      ],
+      "stored_rising_last": [
+        400121,
+        400123,
+        400125,
+        400127
+      ],
+      "stored_rising_deltas": {
+        "2": 63
+      },
+      "valid_sample_count": null
+    },
+    {
+      "channel": 11,
+      "payload_bytes": 50016,
+      "sha256": "6aa7f2d0acb4386a7832fbce8454006cd3ae197363aa05e0c15d08ab71709e5e",
+      "packet_sizes": {
+        "2032": 24,
+        "1248": 1
+      },
+      "first16_hex": "00000000000000000000000000000000",
+      "last32_hex": "00000000000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "stored_rising_count": 64,
+      "stored_rising_first": [
+        400001,
+        400003,
+        400005,
+        400007
+      ],
+      "stored_rising_last": [
+        400121,
+        400123,
+        400125,
+        400127
+      ],
+      "stored_rising_deltas": {
+        "2": 63
+      },
+      "valid_sample_count": null
+    },
+    {
+      "channel": 12,
+      "payload_bytes": 50016,
+      "sha256": "6aa7f2d0acb4386a7832fbce8454006cd3ae197363aa05e0c15d08ab71709e5e",
+      "packet_sizes": {
+        "2032": 24,
+        "1248": 1
+      },
+      "first16_hex": "00000000000000000000000000000000",
+      "last32_hex": "00000000000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "stored_rising_count": 64,
+      "stored_rising_first": [
+        400001,
+        400003,
+        400005,
+        400007
+      ],
+      "stored_rising_last": [
+        400121,
+        400123,
+        400125,
+        400127
+      ],
+      "stored_rising_deltas": {
+        "2": 63
+      },
+      "valid_sample_count": null
+    },
+    {
+      "channel": 13,
+      "payload_bytes": 50016,
+      "sha256": "6aa7f2d0acb4386a7832fbce8454006cd3ae197363aa05e0c15d08ab71709e5e",
+      "packet_sizes": {
+        "2032": 24,
+        "1248": 1
+      },
+      "first16_hex": "00000000000000000000000000000000",
+      "last32_hex": "00000000000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "stored_rising_count": 64,
+      "stored_rising_first": [
+        400001,
+        400003,
+        400005,
+        400007
+      ],
+      "stored_rising_last": [
+        400121,
+        400123,
+        400125,
+        400127
+      ],
+      "stored_rising_deltas": {
+        "2": 63
+      },
+      "valid_sample_count": null
+    },
+    {
+      "channel": 14,
+      "payload_bytes": 50016,
+      "sha256": "d94641f39e220cb2433a0fc99162caa21ee8f878ca17ccaaa8a062033b9a941c",
+      "packet_sizes": {
+        "2032": 24,
+        "1248": 1
+      },
+      "first16_hex": "00000000000000000000000000000000",
+      "last32_hex": "00000000000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "stored_rising_count": 104,
+      "stored_rising_first": [
+        2674,
+        12674,
+        22674,
+        32674
+      ],
+      "stored_rising_last": [
+        400121,
+        400123,
+        400125,
+        400127
+      ],
+      "stored_rising_deltas": {
+        "10000": 39,
+        "7327": 1,
+        "2": 63
+      },
+      "valid_sample_count": null
+    },
+    {
+      "channel": 15,
+      "payload_bytes": 50016,
+      "sha256": "6aa7f2d0acb4386a7832fbce8454006cd3ae197363aa05e0c15d08ab71709e5e",
+      "packet_sizes": {
+        "2032": 24,
+        "1248": 1
+      },
+      "first16_hex": "00000000000000000000000000000000",
+      "last32_hex": "00000000000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "stored_rising_count": 64,
+      "stored_rising_first": [
+        400001,
+        400003,
+        400005,
+        400007
+      ],
+      "stored_rising_last": [
+        400121,
+        400123,
+        400125,
+        400127
+      ],
+      "stored_rising_deltas": {
+        "2": 63
+      },
+      "valid_sample_count": null
+    }
+  ],
+  "evidence_source": "OFFLINE_ANALYSIS_OF_PARENT_CAPTURE",
+  "physical_origin": "PARENT_DECLARED_HARDWARE_NOT_CRYPTOGRAPHIC_PROOF",
+  "requested_channels": [
+    8,
+    14
+  ],
+  "requested_samples": 400000,
+  "sample_rate_hz": 20000000,
+  "duration_ms": 20,
+  "order3_trigger_offset": 22,
+  "order3_channel_count_fields": [
+    25001,
+    25001,
+    25001,
+    25001,
+    25001,
+    25001,
+    25001,
+    25001,
+    25001,
+    25001,
+    25001,
+    25001,
+    25001,
+    25001,
+    25001,
+    25001
+  ]
+}
