@@ -66,6 +66,18 @@ A Complete packet is only a parsed marker. Raw-RX logging metadata regressions
 mock backend subprocess responses: CONTRACT_MOCK, not proof of native logging
 implementation or physical USB capture. See [TASK-046](tasks/DL16-TASK-046-offline-replay.md).
 
+## Native bounded raw-RX logging (DL16-TASK-047)
+
+The final tracked `scripts/patches/atk-dl16-raw-rx.patch` independently instruments
+pinned CPP `CaptureEngine`'s existing synchronous receive path before
+`convert_to_pc`. The repository-owned framed file writer records original reads
+and native status ordinals; no LHX source copied or translated, no protocol or
+recovery command added. Native writer/file failure tests execute the actual C++
+implementation with synthetic bytes and injected I/O failures; Python forwarding
+mocks remain CONTRACT_MOCK. Fresh bootstrap application/build is offline evidence,
+not HIL. Format/completeness boundaries and parent-only hardware recommendation:
+[TASK-047](tasks/DL16-TASK-047-native-raw-rx-logging.md).
+
 ## License hygiene
 
 - Keep provenance, git commit IDs and third-party NOTICE when embedding source in the future.

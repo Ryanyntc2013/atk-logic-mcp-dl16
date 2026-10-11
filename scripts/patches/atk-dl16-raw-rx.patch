@@ -1,0 +1,417 @@
+--- a/core/include/atkdl16/types.h
++++ b/core/include/atkdl16/types.h
+@@ -117,6 +117,8 @@
+ 
+ // Capture Configuration
+ struct CaptureConfig {
++    std::string raw_rx_path;
++    uint64_t raw_rx_max_bytes{32ULL * 1024 * 1024};
+     bool experimental_session_lifecycle{false};
+     CaptureMode mode{CaptureMode::Buffer};
+     uint64_t sample_rate{20'000'000};    // Frequency in Hz (e.g. 20 MHz)
+@@ -215,6 +217,12 @@
+     return true;
+ }
+ 
++struct RawRxLog {
++    bool enabled{false}, truncated{false}, closed{false};
++    uint64_t max_bytes{0}, bytes_written{0}, payload_bytes{0}, observed_bytes{0}, reads{0}, records{0};
++    std::string path, error;
++};
++
+ // Capture Summary Result
+ struct CaptureResult {
+     std::string capture_id;
+@@ -224,6 +232,7 @@
+     std::vector<std::string> warnings;
+     CaptureConfig config;
+     CaptureDiagnostics diagnostics;
++    RawRxLog raw_rx_log;
+     bool cleanup_stop_attempted{false}, cleanup_stop_ok{false};
+ 
+     DataIntegrity data_integrity{DataIntegrity::Unknown};
+--- a/core/include/atkdl16/capture.h
++++ b/core/include/atkdl16/capture.h
+@@ -8,8 +8,65 @@
+ #include <functional>
+ #include <atomic>
+ #include <memory>
++#include <cstdio>
++#include <filesystem>
+ 
+ namespace atkdl16 {
++
++// v1: magic DL16RX01, then LE32 length, LE32 ErrorCode, and exact pre-transform bytes.
++inline bool valid_raw_rx_path(const std::string& path) {
++    if(path.empty() || path.find('\0')!=std::string::npos || !std::filesystem::u8path(path).is_absolute()) return false;
++#ifdef _WIN32
++    if(path.rfind("\\\\",0)==0 || path.rfind("//",0)==0 || path.find(':',2)!=std::string::npos) return false;
++#endif
++    return true;
++}
++
++class RawRxWriter {
++    RawRxLog& log; FILE* file{nullptr};
++    size_t (*write_fn)(const void*,size_t,size_t,FILE*);
++    int (*flush_fn)(FILE*);
++    int (*close_fn)(FILE*);
++    bool fail(const char* text) { log.error = text; return false; }
++public:
++    explicit RawRxWriter(RawRxLog& metadata,
++        size_t (*write)(const void*,size_t,size_t,FILE*)=std::fwrite,
++        int (*flush)(FILE*)=std::fflush, int (*finish)(FILE*)=std::fclose)
++        : log(metadata), write_fn(write), flush_fn(flush), close_fn(finish) {}
++    ~RawRxWriter() { close(); }
++    bool open(const std::string& path, uint64_t limit) {
++        if (path.empty()) return true;
++        log.enabled=true; log.path=path; log.max_bytes=limit;
++        if (limit < 8 || limit > 32ULL*1024*1024) return fail("raw RX limit must be 8..33554432 bytes");
++        const auto p=std::filesystem::u8path(path);
++        if (!valid_raw_rx_path(path)) return fail("raw RX path must be an absolute local file");
++#ifdef _WIN32
++        file=_wfopen(p.c_str(), L"wbx");
++#else
++        file=std::fopen(p.c_str(), "wbx");
++#endif
++        if (!file) return fail("cannot exclusively create raw RX log");
++        if (write_fn("DL16RX01",1,8,file)!=8 || flush_fn(file)!=0) return fail("cannot write raw RX header");
++        log.bytes_written=8; return true;
++    }
++    bool append(const uint8_t* data, size_t n, ErrorCode status) {
++        if (!log.enabled) return true;
++        ++log.reads; log.observed_bytes+=n;
++        if (!log.error.empty()) return false;
++        if (log.truncated || n > log.max_bytes-log.bytes_written || n+8 > log.max_bytes-log.bytes_written) {
++            log.truncated=true; return true;
++        }
++        uint8_t header[8]; uint32_t length=static_cast<uint32_t>(n), code=static_cast<uint32_t>(status);
++        for (unsigned i=0;i<4;++i) { header[i]=static_cast<uint8_t>(length>>(8*i)); header[i+4]=static_cast<uint8_t>(code>>(8*i)); }
++        if (write_fn(header,1,8,file)!=8 || (n && write_fn(data,1,n,file)!=n) || flush_fn(file)!=0)
++            return fail("cannot write/flush raw RX record; file prefix may be incomplete");
++        log.bytes_written+=8+n; log.payload_bytes+=n; ++log.records; return true;
++    }
++    bool close() {
++        if (file) { FILE* f=file; file=nullptr; if(close_fn(f)!=0) fail("cannot close raw RX log"); else log.closed=true; }
++        return log.error.empty();
++    }
++};
+ 
+ using ProgressCallback = std::function<void(uint64_t current_samples, uint64_t total_samples, uint8_t percent)>;
+ 
+--- a/core/src/capture.cpp
++++ b/core/src/capture.cpp
+@@ -47,21 +47,31 @@
+     const char* diag = std::getenv("DL16_NATIVE_DIAGNOSTICS");
+     result.diagnostics.enabled = diag && std::string(diag) == "1";
+     result.success = false;
++    RawRxWriter raw_log(result.raw_rx_log);
++    auto finalize = [&]() {
++        if (!raw_log.close()) {
++            result.success=false; result.error_code=ErrorCode::ArtifactWriteError;
++            result.error_message=result.raw_rx_log.error; result.data_integrity=DataIntegrity::Incomplete;
++        }
++        return result;
++    };
+     m_stop_requested = false;
+     m_cleanup_stop_attempted = false;
+     m_cleanup_stop_result = Error::ok();
+ 
+     if (!m_device.is_open()) {
+         result.error_message = "Logic analyzer device is not open";
+-        return result;
++        return finalize();
+     }
+ 
+     // 1. Hardware Capability Validation
+     auto val_err = CapabilityManager::validate(m_device.info(), config);
+     if (!val_err) {
+         result.error_message = "Capability validation failed: " + val_err.message;
+-        return result;
+-    }
++        return finalize();
++    }
++
++    if (!raw_log.open(config.raw_rx_path, config.raw_rx_max_bytes)) return finalize();
+ 
+     // Experimental session-only lifecycle; known Stop command, no reset/reopen.
+     struct StopCleanup {
+@@ -89,7 +99,7 @@
+     if (!err) {
+         m_state = CaptureState::Error;
+         result.error_message = "Failed to send ParameterSetting command: " + err.message;
+-        return result;
++        return finalize();
+     }
+ 
+     // 4. SETTLE State (Mandatory 30ms hardware DAC settling delay)
+@@ -104,7 +114,7 @@
+         m_state = CaptureState::Error;
+         result.error_code = ErrorCode::UsbTransferError;
+         result.error_message = "Failed to send SimpleTrigger command: " + err.message;
+-        return result;
++        return finalize();
+     }
+ 
+     SampleStore store(config);
+@@ -132,17 +142,20 @@
+             m_state = CaptureState::Error;
+             result.error_code = ErrorCode::CaptureTimeout;
+             result.error_message = "Capture timed out waiting for trigger or completion";
+-            return result;
++            return finalize();
+         }
+ 
+         size_t actual_len = 0;
+         err = m_device.transport().read_bulk(EP_BULK_IN, raw_buf.data(), raw_buf.size(), actual_len, 200);
+         result.diagnostics.observe_read(actual_len);
++        if (!raw_log.append(raw_buf.data(), actual_len, err.code)) {
++            stop(); m_state=CaptureState::Error; return finalize();
++        }
+         if (!err && err.code == ErrorCode::DeviceDisconnected) {
+             m_state = CaptureState::Error;
+             result.error_code = ErrorCode::DeviceDisconnected;
+             result.error_message = "Device disconnected during capture";
+-            return result;
++            return finalize();
+         }
+ 
+         if (actual_len >= USB_BLOCK_SIZE) {
+@@ -184,7 +197,7 @@
+                                 result.error_code = ErrorCode::CapacityExceeded;
+                                 result.error_message = "Capture exceeded on-device memory capacity";
+                                 m_state = CaptureState::Error;
+-                                return result;
++                                return finalize();
+                             }
+                             if (trig_opt->exceed_bandwidth) {
+                                 result.bandwidth_exceeded = true;
+@@ -192,7 +205,7 @@
+                                 result.error_code = ErrorCode::BandwidthExceeded;
+                                 result.error_message = "Capture exceeded USB streaming bandwidth limit";
+                                 m_state = CaptureState::Error;
+-                                return result;
++                                return finalize();
+                             }
+ 
+                             for (size_t i = 0; i < trig_opt->channel_byte_counts.size(); ++i) {
+@@ -230,7 +243,7 @@
+                                 m_state = CaptureState::Error;
+                                 result.error_code = ErrorCode::ProtocolError;
+                                 result.error_message = "SimpleTrigger ACK rejected by FPGA with status " + std::to_string(ack_opt->status);
+-                                return result;
++                                return finalize();
+                             }
+                         }
+                         break;
+@@ -259,19 +272,35 @@
+         result.capture_complete_received = false;
+         result.data_integrity = DataIntegrity::Incomplete;
+         result.success = false;
++    RawRxWriter raw_log(result.raw_rx_log);
++    auto finalize = [&]() {
++        if (!raw_log.close()) {
++            result.success=false; result.error_code=ErrorCode::ArtifactWriteError;
++            result.error_message=result.raw_rx_log.error; result.data_integrity=DataIntegrity::Incomplete;
++        }
++        return result;
++    };
+         result.error_code = m_stop_requested ? ErrorCode::Ok : ErrorCode::CaptureTimeout;
+         result.error_message = m_stop_requested ? "Capture was cancelled by user before completion" : "Capture timed out before Order 6 Complete received";
+         m_state = CaptureState::Error;
+-        return result;
++        return finalize();
+     }
+ 
+     if (!result.trigger_ack_received) {
+         result.data_integrity = DataIntegrity::Incomplete;
+         result.success = false;
++    RawRxWriter raw_log(result.raw_rx_log);
++    auto finalize = [&]() {
++        if (!raw_log.close()) {
++            result.success=false; result.error_code=ErrorCode::ArtifactWriteError;
++            result.error_message=result.raw_rx_log.error; result.data_integrity=DataIntegrity::Incomplete;
++        }
++        return result;
++    };
+         result.error_code = ErrorCode::ProtocolError;
+         result.error_message = "Capture completed without SimpleTrigger confirmation (Order 4 ACK)";
+         m_state = CaptureState::Error;
+-        return result;
++        return finalize();
+     }
+ 
+     if (result.diagnostics.enabled) {
+@@ -280,6 +309,8 @@
+             result.diagnostics.offsets[ch] = channel_start_offsets[ch];
+         }
+     }
++    if (!raw_log.close()) return finalize();
++
+     // 7. Post-processing: Crop and Align Samples
+     if (received_trigger_offset) {
+         store.apply_start_offsets(channel_start_offsets);
+@@ -315,10 +346,18 @@
+     if (!all_channels_complete) {
+         result.data_integrity = DataIntegrity::Incomplete;
+         result.success = false;
++    RawRxWriter raw_log(result.raw_rx_log);
++    auto finalize = [&]() {
++        if (!raw_log.close()) {
++            result.success=false; result.error_code=ErrorCode::ArtifactWriteError;
++            result.error_message=result.raw_rx_log.error; result.data_integrity=DataIntegrity::Incomplete;
++        }
++        return result;
++    };
+         result.error_code = ErrorCode::IncompleteCapture;
+         result.error_message = "Capture incomplete: one or more channels did not receive requested sample count";
+         m_state = CaptureState::Error;
+-        return result;
++        return finalize();
+     }
+ 
+     result.data_integrity = DataIntegrity::Complete;
+@@ -328,16 +367,24 @@
+     if (!save_ok) {
+         result.data_integrity = DataIntegrity::Incomplete;
+         result.success = false;
++    RawRxWriter raw_log(result.raw_rx_log);
++    auto finalize = [&]() {
++        if (!raw_log.close()) {
++            result.success=false; result.error_code=ErrorCode::ArtifactWriteError;
++            result.error_message=result.raw_rx_log.error; result.data_integrity=DataIntegrity::Incomplete;
++        }
++        return result;
++    };
+         result.error_code = ErrorCode::ArtifactWriteError;
+         result.error_message = "Failed to write capture artifacts to directory: " + capture_dir;
+         m_state = CaptureState::Error;
+-        return result;
++        return finalize();
+     }
+ 
+     result.success = true;
+ 
+     m_state = CaptureState::DeviceReady;
+-    return result;
++    return finalize();
+ }
+ 
+ } // namespace atkdl16
+--- a/core/src/json_util.cpp
++++ b/core/src/json_util.cpp
+@@ -61,6 +61,17 @@
+     s << "}"; return s.str();
+ }
+ 
++static std::string raw_log_json(const RawRxLog& d) {
++    std::ostringstream s;
++    s << "{\"schema\":\"dl16-raw-rx/v1\",\"enabled\":" << (d.enabled?"true":"false")
++      << ",\"path\":\"" << json_escape(d.path) << "\",\"max_bytes\":" << d.max_bytes
++      << ",\"bytes_written\":" << d.bytes_written << ",\"payload_bytes\":" << d.payload_bytes
++      << ",\"observed_bytes\":" << d.observed_bytes << ",\"reads\":" << d.reads << ",\"records\":" << d.records
++      << ",\"truncated\":" << (d.truncated?"true":"false") << ",\"closed\":" << (d.closed?"true":"false")
++      << ",\"error\":\"" << json_escape(d.error) << "\",\"completeness\":\"UNKNOWN\"}";
++    return s.str();
++}
++
+ std::string serialize_capture_result_json(const CaptureResult& result, const std::string& out_dir) {
+     std::ostringstream ss;
+     std::string artifact_path = out_dir.empty() ? result.capture_id : (result.capture_id.empty() ? out_dir : (out_dir + "/" + result.capture_id));
+@@ -78,7 +89,7 @@
+             ss << "\"" << json_escape(result.warnings[i]) << "\"";
+             if (i + 1 < result.warnings.size()) ss << ", ";
+         }
+-        ss << "],\n  \"diagnostics\": " << diagnostic_json(result.diagnostics)
++        ss << "],\n  \"diagnostics\": " << diagnostic_json(result.diagnostics) << ",\n  \"raw_rx_log\": " << raw_log_json(result.raw_rx_log)
+        << ",\n  \"cleanup_stop_attempted\": " << (result.cleanup_stop_attempted ? "true":"false")
+        << ",\n  \"cleanup_stop_ok\": " << (result.cleanup_stop_ok ? "true":"false") << "\n}\n";
+         return ss.str();
+@@ -113,7 +124,7 @@
+         ss << "\"" << json_escape(result.warnings[i]) << "\"";
+         if (i + 1 < result.warnings.size()) ss << ", ";
+     }
+-    ss << "],\n  \"diagnostics\": " << diagnostic_json(result.diagnostics)
++    ss << "],\n  \"diagnostics\": " << diagnostic_json(result.diagnostics) << ",\n  \"raw_rx_log\": " << raw_log_json(result.raw_rx_log)
+        << ",\n  \"cleanup_stop_attempted\": " << (result.cleanup_stop_attempted ? "true":"false")
+        << ",\n  \"cleanup_stop_ok\": " << (result.cleanup_stop_ok ? "true":"false") << "\n}\n";
+     return ss.str();
+--- a/cli/main.cpp
++++ b/cli/main.cpp
+@@ -101,7 +101,7 @@
+         if(!session::get_string(req,"command",cmd)){std::cout<<session::error_response(id,"INVALID_COMMAND","command must be a string")<<std::flush;continue;}
+         if(cmd=="hello"){
+             int version=0;if(!session::get_integer(req,"protocol",version)||version!=1){std::cout<<session::error_response(id,"UNSUPPORTED_PROTOCOL","protocol must equal 1")<<std::flush;continue;}
+-            std::cout<<session::response(id,"\"ok\":true,\"protocol\":1,\"native_version\":\"1.0.0\",\"commands\":[\"status\",\"capture\",\"pwm\",\"close\"]")<<std::flush;continue;
++            std::cout<<session::response(id,"\"ok\":true,\"protocol\":1,\"native_version\":\"1.0.0\",\"commands\":[\"status\",\"capture\",\"pwm\",\"close\",\"raw_rx_log_v1\"]")<<std::flush;continue;
+         }
+         if(cmd=="close") {
+             bool cleanup_failed=false;
+@@ -171,6 +171,18 @@
+         if(session::get(req,"trigger_position_percent")&&!session_number(req,"trigger_position_percent",position)){std::cout<<session::error_response(id,"INVALID_CAPTURE","trigger_position_percent must be numeric")<<std::flush;continue;}
+         if(position<0||position>100){std::cout<<session::error_response(id,"INVALID_CAPTURE","trigger position must be 0..100")<<std::flush;continue;}
+         if(const auto* p=session::get(req,"output_dir")){if(p->kind!=session::Value::Kind::String||p->scalar.empty()){std::cout<<session::error_response(id,"INVALID_CAPTURE","output_dir must be a string")<<std::flush;continue;}out=p->scalar;}
++        if(session::get(req,"raw_rx_max_bytes") && !session::get(req,"raw_rx_path")) {
++            std::cout<<session::error_response(id,"INVALID_CAPTURE","raw RX limit requires path")<<std::flush;continue;
++        }
++        if(session::get(req,"raw_rx_path")) {
++            int limit=33554432;
++            if(!session::get_string(req,"raw_rx_path",cfg.raw_rx_path)||cfg.raw_rx_path.empty()||
++               (session::get(req,"raw_rx_max_bytes")&&!session::get_integer(req,"raw_rx_max_bytes",limit))||limit<8||limit>33554432||
++               !valid_raw_rx_path(cfg.raw_rx_path)) {
++                std::cout<<session::error_response(id,"INVALID_CAPTURE","invalid raw RX path/limit")<<std::flush;continue;
++            }
++            cfg.raw_rx_max_bytes=limit;
++        }
+         cfg.sample_rate=static_cast<uint64_t>(rate);if(static_cast<double>(cfg.sample_rate)!=rate){std::cout<<session::error_response(id,"INVALID_CAPTURE","sample_rate_hz must be integral")<<std::flush;continue;}
+         if(!valid_session_trigger(trigger)){std::cout<<session::error_response(id,"INVALID_CAPTURE","trigger syntax is invalid")<<std::flush;continue;}
+         cfg.duration_ms=static_cast<uint64_t>(duration);cfg.threshold_voltage=threshold;cfg.mode=CaptureMode::Buffer;cfg.trigger=parse_trigger(trigger);cfg.trigger.position_percent=position;
+@@ -223,6 +235,8 @@
+               << "  --mode <buffer|stream>        Capture mode (buffer = standard, stream = experimental, default: buffer)\n"
+               << "  --trigger <ch:edge>           Trigger spec (e.g. ch0:rising, immediate, default: immediate)\n"
+               << "  --out <dir>                   Output directory for captures (default: captures)\n"
++              << "  --raw-rx-path <absolute-file> Raw capture RX records (exclusive create; opt-in)\n"
++              << "  --raw-rx-max-bytes <8..33554432> Total file cap (default: 33554432)\n"
+               << "  --json                        Output machine-readable JSON to stdout (default: off)\n";
+ }
+ 
+@@ -233,6 +247,7 @@
+     }
+ 
+     std::string cmd = argv[1];
++    if(cmd=="capabilities") { std::cout << "{\"raw_rx_log\":\"dl16-raw-rx/v1\"}\n"; return 0; }
+     if(cmd=="session"&&argc==3&&std::string(argv[2])=="--jsonl")return run_session_jsonl();
+ 
+     if (cmd == "list") {
+@@ -267,13 +282,19 @@
+ 
+     if (cmd == "capture") {
+         CaptureConfig config;
++        bool raw_path_requested=false, raw_limit_requested=false;
+         std::string out_dir = "captures";
+         bool json_mode = false;
+         int trigger_timeout_sec = 30;
+ 
+         for (int i = 2; i < argc; ++i) {
+             std::string arg = argv[i];
+-            if (arg == "--json") {
++            if (arg == "--raw-rx-path" && i+1<argc) { raw_path_requested=true; config.raw_rx_path=argv[++i];
++            } else if (arg == "--raw-rx-max-bytes" && i+1<argc) { raw_limit_requested=true; std::string limit=argv[++i];
++                if(limit.empty() || limit.find_first_not_of("0123456789")!=std::string::npos || limit.size()>8) { std::cerr<<"Invalid raw RX limit\n";return 1; }
++                config.raw_rx_max_bytes=std::stoull(limit);
++            } else if (arg == "--raw-rx-path" || arg == "--raw-rx-max-bytes") { std::cerr<<"Missing raw RX argument\n";return 1;
++            } else if (arg == "--json") {
+                 json_mode = true;
+             } else if (arg == "--channels" && i + 1 < argc) {
+                 config.enabled_channels = parse_channels(argv[++i]);
+@@ -297,6 +318,11 @@
+             }
+         }
+ 
++        if ((raw_limit_requested && !raw_path_requested) || (raw_path_requested && config.raw_rx_path.empty())) { std::cerr<<"Raw RX logging requires a nonempty path\n";return 1; }
++        if (!config.raw_rx_path.empty() && (config.raw_rx_max_bytes < 8 || config.raw_rx_max_bytes > 33554432 ||
++            !valid_raw_rx_path(config.raw_rx_path))) {
++            std::cerr << "Invalid raw RX path/limit\n"; return 1;
++        }
+         Device dev;
+         auto err = dev.open();
+         if (!err) {

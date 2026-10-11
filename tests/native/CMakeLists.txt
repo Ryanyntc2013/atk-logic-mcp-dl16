@@ -66,6 +66,11 @@ target_link_libraries(dl16-trigger PRIVATE
     Advapi32
 )
 
+# USB-free actual native file writer contracts (DL16-TASK-047).
+add_executable(dl16-raw-rx-logging-test raw_rx_logging_test.cpp)
+target_include_directories(dl16-raw-rx-logging-test PRIVATE "${UP}/core/include")
+target_link_libraries(dl16-raw-rx-logging-test PRIVATE "${UP}/build/Release/atkdl16_core.lib")
+
 # USB-free bounded raw RX offline replay tool (DL16-TASK-046).
 add_executable(dl16-raw-rx-replay raw_rx_replay.cpp)
 target_include_directories(dl16-raw-rx-replay PRIVATE "${UP}/core/include")

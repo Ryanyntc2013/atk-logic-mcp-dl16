@@ -1,3 +1,15 @@
+# Latest continuation — TASK-047, 2026-10-11
+
+TASK-047 delivered tracked native opt-in raw-RX logging before bank conversion,
+whole-read framed files capped at 32MiB, fail-closed write/flush/close handling,
+explicit truncation/counters and UNKNOWN log completeness. Bootstrap now supports
+`-SkipTests` for offline-only builds; the fresh complete patch stack and USB-free
+writer harness built successfully. Explicit venv suite: **230 passed**, compileall
+passed. No hardware operation; parent owns the live instrument. No commit created.
+See `tasks/DL16-TASK-047-native-raw-rx-logging.md` for format, exact commands,
+hashes and parent-only bounded HIL recommendation. Existing headerless replay
+cannot directly ingest the framed container. Stream/cancel remain separate gates.
+
 # Latest continuation — TASK-043/044, 2026-10-11
 
 User authorized uninstall of the old MCP and continuation. System Python's

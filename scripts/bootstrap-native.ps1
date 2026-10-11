@@ -2,6 +2,8 @@
 [CmdletBinding()]
 param(
   [switch]$SkipBuild,
+  # Offline builds must not run upstream's device-open test.
+  [switch]$SkipTests,
   # Platform toolset to build with. Defaults to the locally installed VS2019 (v142)
   # toolset; if it is not present on this machine we fall back to the installed default.
   [string]$Toolset = 'v142'
@@ -81,6 +83,12 @@ if ($LASTEXITCODE -ne 0) { throw 'Stop observation patch check failed' }
 git -C $Dst apply $StopPatch
 if ($LASTEXITCODE -ne 0) { throw 'Stop observation patch apply failed' }
 
+$RawRxPatch = Join-Path $RepoRoot 'scripts\patches\atk-dl16-raw-rx.patch'
+git -C $Dst apply --check $RawRxPatch
+if ($LASTEXITCODE -ne 0) { throw 'Raw RX patch check failed' }
+git -C $Dst apply $RawRxPatch
+if ($LASTEXITCODE -ne 0) { throw 'Raw RX patch apply failed' }
+
 if (-not $SkipBuild) {
   # Prefer the requested toolset only when it is actually installed on this machine;
   # otherwise fall back to the installed default (let CMake pick v143).
@@ -111,8 +119,10 @@ if (-not $SkipBuild) {
   $Dll = Join-Path $Dst 'third_party\libusb\VS2022\MS64\dll\libusb-1.0.dll'
   if (-not (Test-Path $Dll)) { throw 'libusb-1.0.dll not found in pinned third_party; cannot stage runtime dependency' }
   Copy-Item -LiteralPath $Dll -Destination (Join-Path $Dst 'build\Release') -Force
-  & (Join-Path $Dst 'build\Release\atkdl16_tests.exe')
-  if ($LASTEXITCODE -ne 0) { throw 'Native upstream unit tests failed' }
+  if (-not $SkipTests) {
+    & (Join-Path $Dst 'build\Release\atkdl16_tests.exe')
+    if ($LASTEXITCODE -ne 0) { throw 'Native upstream unit tests failed' }
+  }
 }
 Write-Host '[OK] Pinned backend checked out. Binary expected at external/ATK-Logic-Mcp/build/Release/atk-dl16.exe'
 Write-Host 'IMPORTANT: do not run official ATK-Logic GUI concurrently with MCP.'

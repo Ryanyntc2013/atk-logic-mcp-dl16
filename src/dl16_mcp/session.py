@@ -252,6 +252,8 @@ class NativeSession:
                 raise SessionFailure("SESSION_PROTOCOL_ERROR", "native hello handshake missing")
             if request.get("command") == "pwm" and "pwm" not in self.capabilities:
                 raise SessionFailure("NATIVE_CAPABILITY_MISSING", "native hello does not advertise PWM; rebuild patched CLI")
+            if "raw_rx_path" in request and "raw_rx_log_v1" not in self.capabilities:
+                raise SessionFailure("NATIVE_CAPABILITY_MISSING", "native hello does not advertise raw RX logging v1")
             return self._request_locked(request, timeout_s=timeout_s)
 
     def _invalidate(self) -> None:

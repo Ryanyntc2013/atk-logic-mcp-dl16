@@ -143,9 +143,22 @@ def _status_once(cli: Path) -> dict[str, Any]:
 
 def capture(request: CaptureRequest, timeout_s: float = 45.0,
             trigger_position_percent: float | None = None,
-            trigger_timeout_sec: int | None = None) -> dict[str, Any]:
+            trigger_timeout_sec: int | None = None,
+            raw_rx_path: str | Path | None = None,
+            raw_rx_max_bytes: int = 32 * 1024 * 1024) -> dict[str, Any]:
     try:
         request.validate()
+        if raw_rx_path is not None:
+            path = Path(raw_rx_path)
+            if (not path.is_absolute() or path.exists() or path.is_symlink()
+                    or not path.parent.is_dir() or "\x00" in str(path)
+                    or (os.name == "nt" and (":" in str(path)[2:] or str(path).startswith("\\\\")))):
+                raise ValueError("raw_rx_path must be a new absolute local file in an existing directory")
+            if type(raw_rx_max_bytes) is not int or not 8 <= raw_rx_max_bytes <= 32 * 1024 * 1024:
+                raise ValueError("raw_rx_max_bytes must be 8..33554432")
+            raw_rx_path = str(path)
+        elif raw_rx_max_bytes != 32 * 1024 * 1024:
+            raise ValueError("raw_rx_max_bytes requires raw_rx_path")
         if request.rle:
             return {"success": False, "error_code": "RLE_NOT_VALIDATED",
                     "evidence_source": "NONE", "data_integrity": "UNKNOWN",
@@ -164,9 +177,21 @@ def capture(request: CaptureRequest, timeout_s: float = 45.0,
     if cli is None:
         return {"success": False, "error_code": "CLI_MISSING", "evidence_source": "NONE",
                 "data_integrity": "UNKNOWN", "message": "Native binary is not installed"}
+    raw_options: dict[str, Any] = {}
+    if raw_rx_path is not None:
+        try:
+            probe = subprocess.run([str(cli), "capabilities"], capture_output=True,
+                                   text=True, timeout=5, check=False)
+            if probe.returncode != 0 or json.loads(probe.stdout).get("raw_rx_log") != "dl16-raw-rx/v1":
+                raise ValueError("native binary does not advertise raw RX logging v1")
+        except (OSError, subprocess.TimeoutExpired, ValueError, AttributeError) as exc:
+            return {"success": False, "error_code": "RAW_RX_UNSUPPORTED", "message": str(exc),
+                    "data_integrity": "UNKNOWN", "evidence_source": "NONE"}
+        raw_options = {"raw_rx_path": raw_rx_path, "raw_rx_max_bytes": raw_rx_max_bytes}
     if _session_enabled():
         try:
             response = _get_session(cli).request({
+                **raw_options,
                 "command": "capture",
                 "channels": list(request.channels),
                 "sample_rate_hz": request.sample_rate_hz,
@@ -214,6 +239,8 @@ def capture(request: CaptureRequest, timeout_s: float = 45.0,
            "--sample-rate", str(request.sample_rate_hz), "--duration", f"{request.duration_ms}ms",
            "--threshold", str(request.threshold_voltage), "--trigger", request.trigger,
            "--mode", request.mode, "--out", str(captures_dir()), "--json"]
+    if raw_options:
+        cmd += ["--raw-rx-path", str(raw_rx_path), "--raw-rx-max-bytes", str(raw_rx_max_bytes)]
     if trigger_position_percent is not None:
         cmd += ["--trigger-position", str(trigger_position_percent)]
     if trigger_timeout_sec is not None:
