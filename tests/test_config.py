@@ -42,3 +42,16 @@ def test_invalid_override_rejected(monkeypatch):
     monkeypatch.setenv("DL16_MAX_CHANNELS", "99")
     with pytest.raises(ValueError):
         CaptureRequest(channels=(0,)).validate()
+
+
+def test_rle_field_default_and_validation():
+    req = CaptureRequest()
+    assert req.rle is False
+    req.validate()
+
+    req_rle = CaptureRequest(rle=True)
+    assert req_rle.rle is True
+    req_rle.validate()
+
+    with pytest.raises(ValueError, match="must be a boolean"):
+        CaptureRequest(rle="true").validate()  # type: ignore[arg-type]

@@ -285,3 +285,10 @@ def test_native_capture_failure_closes_session_without_replay(monkeypatch, tmp_p
     assert session.requests == 1 and session.closed
     assert result["error_code"] == "CAPTURE_TIMEOUT"
     assert result["session_invalidated"] is True
+
+
+def test_unvalidated_rle_is_not_silently_ignored(monkeypatch):
+    monkeypatch.setattr(backend, "find_native_cli", lambda: (_ for _ in ()).throw(AssertionError("must not launch")))
+    result = backend.capture(CaptureRequest(rle=True))
+    assert result["error_code"] == "RLE_NOT_VALIDATED"
+    assert result["evidence_source"] == "NONE"

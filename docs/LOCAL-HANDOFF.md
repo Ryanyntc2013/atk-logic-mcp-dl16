@@ -21,7 +21,14 @@ criteria. Close returned. Evidence artifacts/hil/DL16-TASK-045; TASK-044 remains
 FAILED and unchanged. No calibrated timing, stream/RLE or unplug claim.
 Next: complete the pending offline raw-RX/RLE drafts and independently gate live
 Stream/cancel; do not infer broad hardware reliability from two captures.
-Raw-RX/RLE drafts remain unfinished and separate; live Stream is not delivered.
+TASK-046 completed the bounded offline raw-RX replay draft (32MiB input cap,
+bank-at-a-time processing, invalid arguments and unaligned tails rejected,
+actual native executable regression coverage). Full Python suite **208 passed**,
+compileall passed; replay-only CMake target built. Raw-RX logging tests remain
+CONTRACT_MOCK, not native logging delivery. RLE requests are fail-closed with
+RLE_NOT_VALIDATED. Live RLE and Stream/cancel are still not delivered.
+Next task: auditable native raw-RX logging with offline failure contracts, then
+separately gated live Stream/cancel; no further hardware test needed for replay.
 
 # Validation environment correction — DL16-TASK-042, 2026-10-11
 

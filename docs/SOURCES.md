@@ -54,6 +54,18 @@ Native session PWM payloads are independently derived from this repository's rev
 
 Strict protocol-1 hello validation and scripted worker reliability regressions are independently implemented from this repository's host-side JSONL ownership contract, without copying or translating third-party code. These tests cover capability isolation, timeout cleanup, explicit fresh owners and stale request rejection; they do not prove physical acquisition generation ownership. See [TASK-043](tasks/DL16-TASK-043-session-reliability.md). Evidence is CONTRACT_MOCK / OFFLINE, not HIL.
 
+## Bounded offline raw-RX replay (DL16-TASK-046)
+
+The repository-owned USB-free harness links the existing pinned CPP core
+`gjjisadog/ATK-Logic-Mcp@5fc47744c18c99f9ad0f554a965eb8cd1160c836`
+(`convert_to_pc`, `RxParser`); it does not modify ignored upstream sources.
+Synthetic bank/frame vectors are independently constructed with this repository's
+`tests/protocol_reference.py`; no LHX source was copied or translated.
+Replay reports OFFLINE_REPLAY with UNKNOWN input provenance/integrity/completeness.
+A Complete packet is only a parsed marker. Raw-RX logging metadata regressions
+mock backend subprocess responses: CONTRACT_MOCK, not proof of native logging
+implementation or physical USB capture. See [TASK-046](tasks/DL16-TASK-046-offline-replay.md).
+
 ## License hygiene
 
 - Keep provenance, git commit IDs and third-party NOTICE when embedding source in the future.

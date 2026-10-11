@@ -65,3 +65,8 @@ target_link_libraries(dl16-trigger PRIVATE
     "${UP}/third_party/libusb/VS2022/MS64/dll/libusb-1.0.lib"
     Advapi32
 )
+
+# USB-free bounded raw RX offline replay tool (DL16-TASK-046).
+add_executable(dl16-raw-rx-replay raw_rx_replay.cpp)
+target_include_directories(dl16-raw-rx-replay PRIVATE "${UP}/core/include")
+target_link_libraries(dl16-raw-rx-replay PRIVATE "${UP}/build/Release/atkdl16_core.lib")

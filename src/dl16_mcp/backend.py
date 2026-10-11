@@ -146,6 +146,10 @@ def capture(request: CaptureRequest, timeout_s: float = 45.0,
             trigger_timeout_sec: int | None = None) -> dict[str, Any]:
     try:
         request.validate()
+        if request.rle:
+            return {"success": False, "error_code": "RLE_NOT_VALIDATED",
+                    "evidence_source": "NONE", "data_integrity": "UNKNOWN",
+                    "message": "Hardware RLE framing and bounded expansion are not validated; request not sent"}
         if not 1.0 <= timeout_s <= 3600:
             raise ValueError("timeout_s must be from 1 to 3600 seconds")
         if trigger_position_percent is not None and not 0.0 <= trigger_position_percent <= 100.0:

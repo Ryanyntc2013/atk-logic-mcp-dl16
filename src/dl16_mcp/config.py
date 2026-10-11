@@ -56,6 +56,7 @@ class CaptureRequest:
     threshold_voltage: float = 1.6
     trigger: str = "immediate"
     mode: str = "buffer"
+    rle: bool = False
 
     def validate(self) -> None:
         if not self.channels or len(self.channels) > max_channels():
@@ -70,6 +71,8 @@ class CaptureRequest:
             raise ValueError("Threshold outside [-5, 5] volts")
         if self.mode != "buffer":
             raise ValueError("Only buffer mode is enabled for trusted captures; stream is not HIL-validated")
+        if not isinstance(self.rle, bool):
+            raise ValueError("CaptureRequest rle must be a boolean")
         if self.trigger != "immediate":
             tokens = [token.strip() for token in self.trigger.split(",") if token.strip()]
             if not tokens:
