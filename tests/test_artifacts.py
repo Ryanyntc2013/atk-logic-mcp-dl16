@@ -1,6 +1,5 @@
 import json
 import zipfile
-import numpy as np
 import pytest
 from dl16_mcp.artifacts import load_atkdl, load_capture
 

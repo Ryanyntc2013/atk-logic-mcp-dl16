@@ -1,7 +1,6 @@
 """Pure offline signal analysis. No native library, USB or MCP imports required."""
 from __future__ import annotations
 
-from collections.abc import Iterable
 from typing import Any
 import math
 
