@@ -1,6 +1,6 @@
 # DL16-TASK-066 — offline data correctness and failure safety
 
-Status: **implementation on review branch; no hardware exercised**.
+Status: **offline fixes complete; gated HIL runner and runbook prepared; HIL_NOT_RUN**.
 
 Branch: `fix/DL16-TASK-066-offline-correctness`
 PR: https://github.com/Ryanyntc2013/atk-logic-mcp-dl16/pull/1
@@ -53,3 +53,10 @@ Never run automatic HIL for this task from CI. Raw/RLE/absolute timing calibrati
 
 PR stays draft until offline CI passes, review is complete, and local hardware gate is either performed or explicitly deferred. Main remains unchanged during this offline work.
 Self-test cleanup semantics: `cleanup_ok` means **software commands/owned worker closure confirmed**, while `physical_pwm_off_verified=False` explicitly requires later instrument observation. A final close response must confirm `closed=True` if output could have been active.
+
+## Prepared on-site validation
+
+One-case-at-a-time gated runner: `scripts/dl16_task066_hil.py`.
+Hardware runbook: [DL16-TASK-066-hil-validation.md](DL16-TASK-066-hil-validation.md).
+Safety checks for harness dry-run: `tests/test_task066_hil_harness.py`.
+This remains **NEEDS_HUMAN_HIL**: real PWM-off and USB owner release require physical observation. No automatic CI HIL.
