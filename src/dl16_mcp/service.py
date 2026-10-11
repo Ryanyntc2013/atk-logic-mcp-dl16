@@ -282,96 +282,158 @@ def logic_buffer_cancel(operation_id: str) -> dict[str, Any]:
 
 
 def logic_self_test(confirm_safe_wiring: bool = False) -> dict[str, Any]:
-    """Run automated hardware end-to-end self-test on loopback channels (CH8=PWM0, CH14=PWM1)."""
-    from pathlib import Path
+    """Bounded loopback diagnostic. Never steal an existing session or certify calibration."""
     import time
-    if not confirm_safe_wiring:
-        return {
-            "success": False,
-            "error_code": "SAFETY_CONFIRMATION_REQUIRED",
-            "message": "Self-test requires confirm_safe_wiring=True confirming CH8 connected to PWM0 and CH14 connected to PWM1 with GUI closed.",
-        }
-    try:
-        logic_session_close()
-        st = logic_status()
-        if not st.get("connected"):
-            return {"success": False, "error_code": "DEVICE_NOT_CONNECTED", "message": "DL16 device is not connected", "status": st}
 
+    if not confirm_safe_wiring:
+        return {"success": False, "error_code": "SAFETY_CONFIRMATION_REQUIRED",
+                "message": "Confirm PWM0->CH8, PWM1->CH14 and closed GUI before self-test"}
+    if backend.has_owned_session():
+        return {"success": False, "error_code": "SESSION_ALREADY_OWNED",
+                "message": "Close the existing session explicitly before self-test; no output changed"}
+
+    active_output_possible = False
+    active_stream_id: str | None = None
+    cleanup: dict[str, Any] = {}
+
+    def run_diagnostic() -> dict[str, Any]:
+        nonlocal active_output_possible, active_stream_id
+        st = logic_status()
+        if not st.get("connected") or not st.get("ready", True):
+            return {"success": False, "error_code": "DEVICE_NOT_CONNECTED", "status": st}
+
+        # Treat a command sent to hardware as possibly effective even if its reply fails.
+        active_output_possible = True
         p0 = logic_pwm(0, "configure", 1000, 50.0, confirm_safe_wiring=True)
+        if not p0.get("success"):
+            return {"success": False, "error_code": "PWM_CONFIG_FAILED", "pwm0": p0}
         p1 = logic_pwm(1, "configure", 2000, 50.0, confirm_safe_wiring=True)
-        if not p0.get("success") or not p1.get("success"):
+        if not p1.get("success"):
             return {"success": False, "error_code": "PWM_CONFIG_FAILED", "pwm0": p0, "pwm1": p1}
 
-        buf = logic_capture(channels=[8, 14], sample_rate_hz=20_000_000, duration_ms=20, threshold_voltage=1.6)
+        buf = logic_capture(channels=[8, 14], sample_rate_hz=20_000_000,
+                            duration_ms=20, threshold_voltage=1.6)
         if not buf.get("success"):
             return {"success": False, "error_code": "BUFFER_CAPTURE_FAILED", "buffer_capture": buf}
-        buf_cid = buf.get("capture_id")
-        buf_p8 = logic_measure_pwm(buf_cid, 8)
-        buf_p14 = logic_measure_pwm(buf_cid, 14)
+        buf_id = buf.get("capture_id")
+        if not isinstance(buf_id, str) or not buf_id:
+            return {"success": False, "error_code": "BUFFER_ARTIFACT_MISSING", "buffer_capture": buf}
+        buf_p8 = logic_measure_pwm(buf_id, 8)
+        buf_p14 = logic_measure_pwm(buf_id, 14)
 
-        logic_session_close()
+        # Existing test procedure uses separate native owners for Buffer and Stream.
+        # Verify cleanup before starting a second owner; do not assume close worked.
+        closed = logic_session_close()
+        if not closed.get("success"):
+            return {"success": False, "error_code": "INTERMEDIATE_CLOSE_FAILED", "close": closed}
+        active_output_possible = True
         p0 = logic_pwm(0, "configure", 1000, 50.0, confirm_safe_wiring=True)
+        if not p0.get("success"):
+            return {"success": False, "error_code": "STREAM_PWM_CONFIG_FAILED", "pwm0": p0}
         p1 = logic_pwm(1, "configure", 2000, 50.0, confirm_safe_wiring=True)
-        if not p0.get("success") or not p1.get("success"):
+        if not p1.get("success"):
             return {"success": False, "error_code": "STREAM_PWM_CONFIG_FAILED", "pwm0": p0, "pwm1": p1}
 
-        str_start = logic_stream_start(
+        started = logic_stream_start(
             experimental_opt_in=True,
             safety_confirmation="CONFIRMED_SAFE_WIRING_GUI_CLOSED",
-            channels=[8, 14],
-            sample_rate_hz=1_000_000,
-            duration_ms=100,
-            threshold_voltage=1.6,
-        )
-        op_id = str_start.get("operation_id")
-        if not op_id:
-            return {"success": False, "error_code": "STREAM_START_FAILED", "stream_start": str_start}
+            channels=[8, 14], sample_rate_hz=1_000_000,
+            duration_ms=100, threshold_voltage=1.6)
+        op_id = started.get("operation_id")
+        if not started.get("ok", started.get("success", bool(op_id))) or not isinstance(op_id, str) or not op_id:
+            return {"success": False, "error_code": "STREAM_START_FAILED", "stream_start": started}
+        active_stream_id = op_id
 
-        t0 = time.monotonic()
-        while True:
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
             poll = logic_stream_poll(op_id)
             if poll.get("state") == "finished":
+                active_stream_id = None
                 break
+            if poll.get("success") is False or poll.get("ok") is False:
+                return {"success": False, "error_code": "STREAM_POLL_FAILED", "poll": poll}
             time.sleep(0.02)
-            if time.monotonic() - t0 > 10:
-                return {"success": False, "error_code": "STREAM_TIMEOUT", "poll": poll}
+        else:
+            return {"success": False, "error_code": "STREAM_TIMEOUT", "operation_id": op_id}
 
-        str_res = poll.get("response", {}).get("result", {})
-        str_dir = str_res.get("artifact_directory", "")
-        str_cid = Path(str_dir).name
-        str_p8 = logic_measure_pwm(str_cid, 8)
-        str_p14 = logic_measure_pwm(str_cid, 14)
-
-        logic_session_close()
+        result = poll.get("response", {}).get("result", {})
+        if not isinstance(result, dict):
+            return {"success": False, "error_code": "STREAM_RESULT_MISSING", "poll": poll}
+        reason = result.get("reason")
+        if reason not in ("DEADLINE", "COMPLETE") or result.get("cleanup_stop_ok") is not True:
+            return {"success": False, "error_code": "STREAM_TERMINATION_UNVERIFIED",
+                    "reason": reason, "cleanup_stop_ok": result.get("cleanup_stop_ok")}
+        stored_bytes = result.get("stored_bytes", 0)
+        if not isinstance(stored_bytes, int) or stored_bytes <= 0:
+            return {"success": False, "error_code": "STREAM_NO_DATA", "stored_bytes": stored_bytes}
+        stream_dir = result.get("artifact_directory", "")
+        stream_id = str(stream_dir).rstrip("/\\").replace("\\", "/").split("/")[-1]
+        if not stream_id or stream_id == ".":
+            return {"success": False, "error_code": "STREAM_ARTIFACT_MISSING"}
+        str_p8 = logic_measure_pwm(stream_id, 8)
+        str_p14 = logic_measure_pwm(stream_id, 14)
 
         buf_ok = (990 <= buf_p8.get("frequency_hz_median", 0) <= 1010 and
                   1980 <= buf_p14.get("frequency_hz_median", 0) <= 2020)
         str_ok = (990 <= str_p8.get("frequency_hz_median", 0) <= 1010 and
                   1980 <= str_p14.get("frequency_hz_median", 0) <= 2020)
-
-        all_ok = buf_ok and str_ok
         return {
-            "success": all_ok,
-            "overall_health": "HEALTHY" if all_ok else "DEGRADED",
+            "success": bool(buf_ok and str_ok),
+            "overall_health": "DIAGNOSTIC_PASS_UNCALIBRATED" if buf_ok and str_ok else "DEGRADED",
             "device": st.get("details", {}).get("model", "DL16"),
-            "buffer_capture": {
-                "ok": buf_ok,
-                "capture_id": buf_cid,
+            "buffer_capture": {"ok": buf_ok, "capture_id": buf_id,
                 "ch8_freq_hz": buf_p8.get("frequency_hz_median"),
-                "ch14_freq_hz": buf_p14.get("frequency_hz_median"),
-                "ch8_jitter_rms_ns": buf_p8.get("period_ns_jitter_rms"),
-                "ch14_jitter_rms_ns": buf_p14.get("period_ns_jitter_rms"),
-            },
-            "stream_capture": {
-                "ok": str_ok,
-                "capture_id": str_cid,
-                "stored_bytes": str_res.get("stored_bytes"),
-                "reads": str_res.get("reads"),
+                "ch14_freq_hz": buf_p14.get("frequency_hz_median")},
+            "stream_capture": {"ok": str_ok, "capture_id": stream_id,
+                "stored_bytes": stored_bytes, "reads": result.get("reads"),
+                "termination_reason": reason, "data_integrity": str_p8.get("integrity"),
                 "ch8_freq_hz": str_p8.get("frequency_hz_median"),
-                "ch14_freq_hz": str_p14.get("frequency_hz_median"),
-            },
+                "ch14_freq_hz": str_p14.get("frequency_hz_median")},
+            "calibrated_timing_verified": False,
         }
-    except Exception as exc:
-        logic_session_close()
-        return {"success": False, "error_code": "SELF_TEST_EXCEPTION", "message": str(exc)}
 
+    try:
+        report = run_diagnostic()
+    except Exception as exc:
+        report = {"success": False, "error_code": "SELF_TEST_EXCEPTION", "message": str(exc)}
+    finally:
+        if active_stream_id is not None:
+            try:
+                cleanup["stream_cancel"] = logic_stream_cancel(active_stream_id)
+                deadline = time.monotonic() + 3
+                terminal = False
+                while time.monotonic() < deadline:
+                    response = logic_stream_poll(active_stream_id)
+                    if response.get("state") == "finished":
+                        terminal = True
+                        break
+                    if response.get("success") is False or response.get("ok") is False:
+                        break
+                    time.sleep(0.02)
+                cleanup["stream_finished"] = terminal
+            except Exception as exc:
+                cleanup["stream_cancel_error"] = str(exc)
+        if active_output_possible:
+            for output in (0, 1):
+                try:
+                    cleanup[f"pwm{output}_stop"] = logic_pwm(output, "stop", confirm_safe_wiring=True)
+                except Exception as exc:
+                    cleanup[f"pwm{output}_stop"] = {"success": False, "message": str(exc)}
+        try:
+            cleanup["session_close"] = logic_session_close()
+        except Exception as exc:
+            cleanup["session_close"] = {"success": False, "message": str(exc)}
+
+    cleanup_ok = (
+        (active_stream_id is None or cleanup.get("stream_finished") is True) and
+        all(cleanup.get(f"pwm{i}_stop", {}).get("success") is True
+            for i in (0, 1) if active_output_possible) and
+        cleanup.get("session_close", {}).get("success") is True
+    )
+    report["cleanup"] = cleanup
+    report["cleanup_ok"] = cleanup_ok
+    if not cleanup_ok:
+        report["success"] = False
+        report["overall_health"] = "UNVERIFIED_CLEANUP"
+        report.setdefault("error_code", "SELF_TEST_CLEANUP_UNVERIFIED")
+    return report
