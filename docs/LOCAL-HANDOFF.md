@@ -1,3 +1,15 @@
+# Latest continuation — TASK-065, 2026-10-11
+
+BLOCKED only on full requested METRO test command (pre-existing B6 assertion);
+trigger-origin offline scope PASS, physical product UNVERIFIED / HIL_NOT_RUN.
+Host delta lives in sibling timeSync-new; independently authored tracked patch
+preserves only this increment and its baseline hashes, not unrelated dirty work.
+Read-only frozen G2 shot1: uncropped late=[2000000], cropped CH3/CH7 each[2000],
+delta=0.0us, measurement_valid=true; FAIL/R2 source hashes unchanged.
+Validation: 62 passed /1 baseline failed; 190 scope passed /1 explicitly deselected;
+compileall/editor diagnostics PASS. No native/firmware/FC/B6/S5Q/live actions.
+Details: [tasks/DL16-TASK-065-metro-trigger-origin.md](tasks/DL16-TASK-065-metro-trigger-origin.md).
+
 # Latest continuation — TASK-064, 2026-10-11
 
 HIL DONE. Delivered automated hardware diagnostic tool `logic_self_test(confirm_safe_wiring=True)`.

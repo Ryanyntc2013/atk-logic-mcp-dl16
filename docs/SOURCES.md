@@ -1,5 +1,24 @@
 # Upstream provenance and reuse matrix (2026-10-10)
 
+## TASK-065 METRO headless session origin (2026-10-11)
+
+The [host-only increment](tasks/DL16-TASK-065-metro-trigger-origin.md) is
+independently authored against the existing sibling METRO materializer and its
+preserved dirty baseline, not copied from LHX/vendor code. The tracked patch
+contains only this task's delta. Percent-aligned Buffer coordinates and the
+1..7-sample order-3 offset discrepancy are grounded in the local archived
+[TASK-013 alignment record](research/DL16-TASK-013-trigger-alignment.md).
+CLI offset remains post-trigger remaining; ATK TriggerSamplingDepth is session
+pre-trigger depth. Explicit profile precedence and discrepancy bounds do not
+establish Stream units or universal firmware behavior. Frozen G2 FAIL/R2 inputs
+were read-only hashed before/after; original FAIL becomes a newly recorded
+**offline** waveform/ARM-STATUS transform PASS at CH3/CH7 sample2000, not a
+rewritten historical verdict, hardware gating proof, or ≤1us product claim.
+Synthetic regressions retain SYNTHETIC; absent source labels remain UNKNOWN.
+No native executable, USB command, driver, firmware, threshold or live action
+changed. HIL_NOT_RUN. Complete requested test command remains FAIL due to the
+separately reproduced pre-existing B6 assertion; it is not relabeled PASS.
+
 ## TASK-058 Stream raw-RX logging boundary
 
 Tracked native patch `scripts/patches/atk-dl16-experimental-stream.patch` and

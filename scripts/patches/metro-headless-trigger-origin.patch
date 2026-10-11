@@ -1,0 +1,574 @@
+# DL16-TASK-065: host-only delta for sibling timeSync-new dirty baseline.
+# Apply from METRO root; do not apply twice. Baseline SHA-256 follows.
+# tools/atk_dl16_headless.py: 1d4300edb201364d65481808cc367f58f5e1bb71feecde1c053ca8fa51632d55
+# tests/tools/test_atk_dl16_headless_offline.py: 8f3b4f358cc7dc70615a97de5b4d8d64595bafce638e4a6ea7b92d63421e629a
+# tests/tools/test_atk_dl16_metro_first_window_offline.py: dc4ff940d9e97b7d6e00fa71342d8aa793d91c1fc09729887b6e18478cdcf52f
+--- a/tools/atk_dl16_headless.py
++++ b/tools/atk_dl16_headless.py
+@@ -15,6 +15,7 @@
+ import subprocess
+ import time
+ from dataclasses import dataclass, field
++from decimal import Decimal, InvalidOperation
+ from pathlib import Path
+ from typing import Any
+ 
+@@ -100,34 +101,59 @@
+     return digest.hexdigest()
+ 
+ 
+-# Keep ≥100 us pre-roll for classify_edge_result context; stay inside metro 1000 us window.
+-_METRO_TRIGGER_PRE_ROLL_SAMPLES = 2000  # 200 us @ 10 MHz
++# 200 us at the default 10 MHz; scale by actual Hz before byte alignment.
++_METRO_TRIGGER_PRE_ROLL_SAMPLES = 2000
++_METRO_TRIGGER_REFERENCE_RATE_HZ = 10_000_000
++# TASK-013 aligned-buffer observations: order-3 differs by 1..7 samples.
++_TRIGGER_OFFSET_ALIGNMENT_SAMPLES = 7
++
++
++def _metadata_integer(value: Any, name: str) -> int:
++    try:
++        number = Decimal(str(value))
++    except (InvalidOperation, ValueError):
++        raise ValueError(f"{name} must be an integer") from None
++    if not number.is_finite() or number != number.to_integral_value():
++        raise ValueError(f"{name} must be a finite integer")
++    return int(number)
+ 
+ 
+ def resolve_trigger_index(meta: dict[str, Any], depth: int) -> int:
+-    """Map headless meta to ATK-style trigger sample index (pre-trigger depth).
+-
+-    CLI ``trigger_offset`` is post-trigger remaining samples; ATK
+-    ``TriggerSamplingDepth`` is the trigger index / pre-trigger count.
++    """Resolve the trigger in the aligned native buffer, not an edge search.
++
++    Position percent is primary in this buffer profile (TASK-013). Order-3
++    ``trigger_offset`` counts post-trigger remaining samples, not ATK pre-trigger
++    depth; preserve its byte-alignment discrepancy rather than shifting edges.
++    Missing trigger fields retain the legacy uncropped origin, not a proven trigger.
+     """
+     if depth <= 0:
+-        return 0
+-    pct = meta.get("trigger_position_percent")
+-    if pct is not None:
++        raise ValueError("capture depth must be positive")
++    position_index = None
++    if "trigger_position_percent" in meta:
+         try:
+-            position = int(pct)
+-        except (TypeError, ValueError):
+-            position = -1
+-        if 0 <= position <= 100:
+-            return (depth * position) // 100
+-    offset = meta.get("trigger_offset")
+-    if offset is not None:
+-        try:
+-            post = int(offset)
+-        except (TypeError, ValueError):
+-            post = -1
+-        if 0 <= post <= depth:
+-            return depth - post
++            position = Decimal(str(meta["trigger_position_percent"]))
++        except InvalidOperation:
++            raise ValueError("invalid trigger_position_percent") from None
++        if not position.is_finite() or not 0 <= position < 100:
++            raise ValueError("trigger_position_percent must be finite and in [0, 100)")
++        position_index = int(Decimal(depth) * position / 100)
++
++    offset_index = None
++    if "trigger_offset" in meta:
++        post = _metadata_integer(meta["trigger_offset"], "trigger_offset")
++        if post < 0:
++            raise ValueError("trigger_offset must be non-negative")
++        offset_index = depth - post
++        if position_index is not None:
++            if abs(position_index - offset_index) > _TRIGGER_OFFSET_ALIGNMENT_SAMPLES:
++                raise ValueError("trigger position and post-trigger offset disagree")
++        elif not 0 <= offset_index < depth:
++            raise ValueError("trigger_offset places trigger outside capture depth")
++
++    if position_index is not None:
++        return position_index
++    if offset_index is not None:
++        return offset_index
+     return 0
+ 
+ 
+@@ -150,15 +176,22 @@
+     session_dir = Path(session_dir)
+     if session_dir.exists():
+         raise FileExistsError(f"refusing to overwrite session at {session_dir}")
+-    session_dir.mkdir(parents=True)
+-
+     meta_path = capture_dir / "meta.json"
+     meta: dict[str, Any] = {}
+     if meta_path.is_file():
+         meta = json.loads(meta_path.read_text(encoding="utf-8"))
+-
+-    rate = int(meta.get("sample_rate") or sample_rate_hz)
+-    depth = int(meta.get("actual_samples") or meta.get("requested_samples") or 0)
++        if not isinstance(meta, dict):
++            raise ValueError("headless meta.json must be an object")
++    if meta.get("data_integrity", "COMPLETE") != "COMPLETE":
++        raise ValueError("headless data_integrity must be COMPLETE")
++
++    rate = _metadata_integer(meta.get("sample_rate", sample_rate_hz), "sample_rate")
++    if rate <= 0:
++        raise ValueError("sample_rate must be positive")
++    depth_value = meta.get("actual_samples", meta.get("requested_samples"))
++    depth = None if depth_value is None else _metadata_integer(depth_value, "capture depth")
++    if depth is not None and depth <= 0:
++        raise ValueError("capture depth must be positive")
+ 
+     bit_files: dict[int, Path] = {}
+     for ch in channels:
+@@ -168,31 +201,41 @@
+         bit_files[ch] = candidate
+ 
+     sizes = {ch: bit_files[ch].stat().st_size for ch in channels}
++    if not sizes:
++        raise ValueError("at least one channel is required")
+     if len(set(sizes.values())) != 1:
+         raise ValueError(f"channel bit lengths disagree: {sizes}")
+     byte_len = next(iter(sizes.values()))
+     if byte_len <= 0:
+         raise ValueError("empty channel bit payload")
+-    depth_from_bytes = byte_len * 8
+-    if depth <= 0:
+-        depth = depth_from_bytes
+-    elif depth > depth_from_bytes:
+-        depth = depth_from_bytes
++    if depth is None:
++        depth = byte_len * 8
++    if byte_len != (depth + 7) // 8:
++        raise ValueError(f"capture depth disagrees with packed payload: depth={depth}, bytes={byte_len}")
++    if "requested_samples" in meta:
++        requested = _metadata_integer(meta["requested_samples"], "requested_samples")
++        if requested <= 0 or depth != requested:
++            raise ValueError("complete capture depth disagrees with requested_samples")
+ 
+     trigger_index = resolve_trigger_index(meta, depth)
+-    crop_start = 0
+-    if trigger_index > 0:
+-        crop_start = max(0, trigger_index - _METRO_TRIGGER_PRE_ROLL_SAMPLES)
+-        crop_start = (crop_start // 8) * 8  # LSB-first packed bits
++    trigger_known = "trigger_position_percent" in meta or "trigger_offset" in meta
++    pre_roll_samples = (
++        rate * _METRO_TRIGGER_PRE_ROLL_SAMPLES + _METRO_TRIGGER_REFERENCE_RATE_HZ - 1
++    ) // _METRO_TRIGGER_REFERENCE_RATE_HZ
++    crop_start = max(0, trigger_index - pre_roll_samples)
++    crop_start = (crop_start // 8) * 8  # One common LSB-first packed-byte origin.
+     session_depth = depth - crop_start
+-    if session_depth <= 0:
+-        raise ValueError(
+-            f"trigger crop emptied session (depth={depth}, crop_start={crop_start})"
+-        )
+-    # ATK TriggerSamplingDepth = pre-trigger count inside the (possibly cropped) session.
+-    trigger_depth = max(0, trigger_index - crop_start)
+-    if trigger_depth > session_depth:
+-        trigger_depth = 0
++    trigger_depth = trigger_index - crop_start
++    if trigger_known:
++        from tools.metro_edge_policy import DEFAULT_METRO_FIRST_WINDOW_US
++
++        window_samples = int(Decimal(str(DEFAULT_METRO_FIRST_WINDOW_US)) * rate / 1_000_000)
++        if session_depth <= window_samples:
++            raise ValueError("trigger crop lacks the full metro first_window depth")
++        if trigger_depth > window_samples:
++            raise ValueError("trigger crop lies outside metro first_window")
++
++    session_dir.mkdir(parents=True)
+ 
+     # SamplingFrequency is kHz in ATK channel.ini (10e6 Hz -> 10000.0).
+     rate_khz = rate / 1000.0
+@@ -233,6 +276,36 @@
+             }
+         )
+ 
++    origin = {
++        "schema": "atk-headless-session-origin/v1",
++        "sample_rate_hz": rate,
++        "raw_capture_depth_samples": depth,
++        "raw_trigger_index": trigger_index if trigger_known else None,
++        "trigger_index_source": (
++            "trigger_position_percent" if "trigger_position_percent" in meta
++            else "trigger_offset" if "trigger_offset" in meta else "UNKNOWN"
++        ),
++        "native_trigger_position_percent": meta.get("trigger_position_percent"),
++        "native_trigger_offset_post_samples": meta.get("trigger_offset"),
++        "native_offset_trigger_index": (
++            depth - _metadata_integer(meta["trigger_offset"], "trigger_offset")
++            if "trigger_offset" in meta else None
++        ),
++        "session_crop_start_samples": crop_start,
++        "session_depth_samples": session_depth,
++        "trigger_depth_samples": trigger_depth,
++        "requested_pre_roll_samples": pre_roll_samples,
++        "available_pre_roll_us": trigger_depth * 1_000_000 / rate,
++        "minimum_pre_roll_available": trigger_known and trigger_depth * 1_000_000 >= rate * 100,
++        "raw_sample_mapping": "raw_sample = session_sample + session_crop_start_samples",
++        "source_meta_sha256": _sha256_file(meta_path) if meta_path.is_file() else None,
++        "source_bit_sha256": {str(ch): _sha256_file(path) for ch, path in bit_files.items()},
++        "evidence_source": meta.get("evidence_source", "UNKNOWN"),
++    }
++    (session_dir / "headless-materialization.json").write_text(
++        json.dumps(origin, indent=2) + "\n", encoding="utf-8"
++    )
++
+     # Preserve native headless artifacts alongside session for forensics.
+     native = session_dir / "headless-native"
+     shutil.copytree(capture_dir, native)
+@@ -247,13 +320,14 @@
+         "raw_capture_depth_samples": depth,
+         "raw_trigger_index": trigger_index,
+         "session_crop_start_samples": crop_start,
++        "session_origin": origin,
+         "raw_chunks": raw_chunks,
+         "instrument": {
+             "model": "ATK-DL16 headless (atk-dl16)",
+             "sample_rate_hz": rate,
+             "rate_hz": rate,
+             "channels": list(channels),
+-            "evidence_source": meta.get("evidence_source", "REAL_HARDWARE"),
++            "evidence_source": meta.get("evidence_source", "UNKNOWN"),
+             "capture_id": meta.get("capture_id"),
+             "data_integrity": meta.get("data_integrity"),
+         },
+--- a/tests/tools/test_atk_dl16_headless_offline.py
++++ b/tests/tools/test_atk_dl16_headless_offline.py
+@@ -262,3 +262,105 @@
+     fake.write_bytes(b"MZ")
+     monkeypatch.setenv("ATK_DL16_CLI", str(fake))
+     assert resolve_atk_dl16_cli() == fake.resolve()
++
++
++@pytest.mark.parametrize("meta", [
++    {"trigger_position_percent": -1},
++    {"trigger_position_percent": 100},
++    {"trigger_position_percent": "NaN"},
++    {"trigger_position_percent": True},
++    {"trigger_position_percent": None},
++    {"trigger_position_percent": "invalid", "trigger_offset": 18000},
++    {"trigger_offset": -1},
++    {"trigger_offset": 0},
++    {"trigger_offset": 20001},
++    {"trigger_offset": 18000.5},
++    {"trigger_position_percent": 10, "trigger_offset": 10000},
++])
++def test_invalid_trigger_metadata_fails_closed(meta):
++    from tools.atk_dl16_headless import resolve_trigger_index
++
++    with pytest.raises(ValueError):
++        resolve_trigger_index(meta, 20000)
++
++
++def test_trigger_mapping_profile_is_explicit():
++    from tools.atk_dl16_headless import resolve_trigger_index
++
++    assert resolve_trigger_index({"trigger_position_percent": 10.5}, 20000) == 2100
++    assert resolve_trigger_index({"trigger_position_percent": 0, "trigger_offset": 20003}, 20000) == 0
++    assert resolve_trigger_index({"trigger_position_percent": 10, "trigger_offset": 18007}, 20000) == 2000
++    assert resolve_trigger_index({"trigger_offset": 18000}, 20000) == 2000
++    assert resolve_trigger_index({}, 20000) == 0
++    with pytest.raises(ValueError, match="disagree"):
++        resolve_trigger_index({"trigger_position_percent": 10, "trigger_offset": 18008}, 20000)
++    with pytest.raises(ValueError, match="positive"):
++        resolve_trigger_index({}, 0)
++
++
++@pytest.mark.parametrize("override", [
++    {"actual_samples": 20001},
++    {"actual_samples": 19984},
++    {"actual_samples": 0},
++    {"actual_samples": -1},
++    {"actual_samples": 20000.5},
++    {"actual_samples": "NaN"},
++    {"sample_rate": 0},
++    {"sample_rate": -1},
++    {"sample_rate": "Infinity"},
++    {"sample_rate": 10_000_000.5},
++    {"requested_samples": 20008},
++    {"data_integrity": "INCOMPLETE"},
++    {"data_integrity": "UNKNOWN"},
++    {"trigger_position_percent": "bad"},
++])
++def test_invalid_capture_metadata_never_creates_session(tmp_path, override):
++    cap = tmp_path / "cap"
++    cap.mkdir()
++    for ch in (3, 7):
++        (cap / f"ch{ch:02d}.bits").write_bytes(b"\x00" * 2500)
++    source = {"sample_rate": 10_000_000, "actual_samples": 20000, **override}
++    (cap / "meta.json").write_text(json.dumps(source), encoding="utf-8")
++    session = tmp_path / "session"
++    with pytest.raises(ValueError):
++        materialize_session_from_headless(cap, session)
++    assert not session.exists()
++    assert json.loads((cap / "meta.json").read_text()) == source
++
++
++def test_unknown_source_is_not_promoted_to_hardware(tmp_path):
++    cap = tmp_path / "cap"
++    cap.mkdir()
++    for ch in (3, 7):
++        (cap / f"ch{ch:02d}.bits").write_bytes(b"\x00" * 2500)
++    session = tmp_path / "session"
++    result = materialize_session_from_headless(cap, session)
++    assert result["instrument"]["evidence_source"] == "UNKNOWN"
++    assert result["session_origin"]["trigger_index_source"] == "UNKNOWN"
++    assert result["session_origin"]["raw_trigger_index"] is None
++
++
++def test_input_hashes_and_native_copy_are_preserved(tmp_path):
++    import hashlib
++
++    cap = tmp_path / "cap"
++    cap.mkdir()
++    for ch in (3, 7):
++        (cap / f"ch{ch:02d}.bits").write_bytes(b"\x00" * 25000)
++    (cap / "meta.json").write_text(json.dumps({
++        "sample_rate": 10_000_000, "actual_samples": 200000,
++        "trigger_position_percent": 10, "trigger_offset": 180003,
++        "evidence_source": "SYNTHETIC",
++    }))
++    originals = {path.name: path.read_bytes() for path in cap.iterdir()}
++    session = tmp_path / "session"
++    result = materialize_session_from_headless(cap, session)
++    origin = result["session_origin"]
++    assert origin["source_meta_sha256"] == hashlib.sha256(originals["meta.json"]).hexdigest()
++    for ch in (3, 7):
++        assert origin["source_bit_sha256"][str(ch)] == hashlib.sha256(originals[f"ch{ch:02d}.bits"]).hexdigest()
++    for name, raw in originals.items():
++        assert (cap / name).read_bytes() == raw
++        assert (session / "headless-native" / name).read_bytes() == raw
++    with pytest.raises(FileExistsError):
++        materialize_session_from_headless(cap, session)
+--- a/tests/tools/test_atk_dl16_metro_first_window_offline.py
++++ b/tests/tools/test_atk_dl16_metro_first_window_offline.py
+@@ -143,3 +143,190 @@
+     assert c7["ok"] is True
+     assert c3["selected"] == meta["trigger_depth_samples"]
+     assert c7["selected"] == meta["trigger_depth_samples"]
++
++    for ch, rate in ((3, rate3), (7, rate7)):
++        uncropped = select_rising_edge_for_measurement(
++            [trigger_index], sample_rate_hz=rate,
++            policy=EDGE_POLICY_METRO_FIRST_WINDOW, window_us=1000.0,
++            channel_label=f"CH{ch}",
++        )
++        assert uncropped["ok"] is False
++        assert uncropped["late_edges"] == [2_000_000]
++    assert e3 == e7 == [2000]
++    paired = _validate_pair(bits3, bits7, rate3)
++    assert paired["measurement_valid"] is True
++    assert paired["delta_us"] == 0.0
++    assert paired["first_window_us"] == 1000.0
++    assert meta["session_origin"]["evidence_source"] == "SYNTHETIC"
++
++
++def _validate_pair(bits3, bits7, rate):
++    from tools.rm2_validation import validate_paired_measurement
++
++    target = 12345678
++    session = "0x9714F5E4A68CA0D9"
++    return validate_paired_measurement(
++        shot=1, target_tick=target,
++        res_m=[f"+M5:ARM_OK,ROLE=MASTER,TARGET={target},CC64=1,CC32=0x1,LEAD=100,SESSION={session},GEN=0", "OK"],
++        res_s=[f"+M5:ARM_OK,ROLE=SLAVE,TARGET={target},CC64=1,CC32=0x1,LEAD=100,SESSION={session},GEN=4", "OK"],
++        status_m_before=[f"+M5:STATUS,ROLE=MASTER,LC=IDLE,FIRED=5,SESSION={session},GEN=0", "OK"],
++        status_s_before=[f"+M5:STATUS,ROLE=SLAVE,LC=IDLE,FIRED=2,SESSION={session},GEN=4", "OK"],
++        status_m_after=[f"+M5:STATUS,ROLE=MASTER,LC=FIRED,TARGET={target},FIRED=6,SESSION={session},GEN=0", "OK"],
++        status_s_after=[f"+M5:STATUS,ROLE=SLAVE,LC=FIRED,TARGET={target},FIRED=3,SESSION={session},GEN=4", "OK"],
++        bits3=bits3, bits7=bits7, rate3_hz=rate, rate7_hz=rate,
++        edge_policy=EDGE_POLICY_METRO_FIRST_WINDOW, first_window_us=1000.0,
++    )
++
++
++def _synthetic_cap(tmp_path, *, depth, trigger_index, meta):
++    cap = tmp_path / "cap"
++    cap.mkdir()
++    for ch in (3, 7):
++        _write_step_bits(cap / f"ch{ch:02d}.bits", depth, trigger_index)
++    (cap / "meta.json").write_text(json.dumps({
++        "sample_rate": 10_000_000, "actual_samples": depth,
++        "data_integrity": "COMPLETE", "evidence_source": "SYNTHETIC", **meta,
++    }), encoding="utf-8")
++    return cap
++
++
++@pytest.mark.parametrize("position", [0, 10, 50])
++@pytest.mark.parametrize("rate", [1_000_000, 10_000_000, 20_000_000])
++def test_trigger_positions_and_rate_scaled_pre_roll(tmp_path, position, rate):
++    from tools.task20_dl16_capture import classify_edge_result
++
++    depth = rate // 50  # 20 ms, long enough for the unchanged first window.
++    trigger = depth * position // 100
++    rise = trigger if trigger else 17  # GUI-like visible edge; never invent sample-0 rise.
++    cap = _synthetic_cap(tmp_path, depth=depth, trigger_index=rise, meta={
++        "sample_rate": rate, "trigger_position_percent": position,
++        "trigger_offset": depth - trigger + 3,  # archived native byte alignment
++    })
++    session = tmp_path / "session"
++    result = materialize_session_from_headless(cap, session)
++    bits3, rate3 = decode_session_channel(session, 3)
++    bits7, _ = decode_session_channel(session, 7)
++    crop = result["session_crop_start_samples"]
++    assert crop % 8 == 0
++    expected = rise - crop
++    assert extract_rising_edges(bits3).tolist() == [expected]
++    assert extract_rising_edges(bits7).tolist() == [expected]
++    paired = _validate_pair(bits3, bits7, rate3)
++    assert paired["measurement_valid"] is True
++    assert paired["delta_us"] == 0.0
++    context = classify_edge_result(
++        master_edges=[expected], slave_edges=[expected], sample_rate_hz=rate,
++        capture_depth_samples=result["capture_depth_samples"],
++        trigger_depth_samples=result["trigger_depth_samples"],
++        edge_policy=EDGE_POLICY_METRO_FIRST_WINDOW,
++    )
++    if position:
++        assert 200 <= result["session_origin"]["available_pre_roll_us"] <= 208
++        assert context["status"] == "FIRST_PHYSICAL_EDGE_SMOKE_PASS"
++    else:
++        assert crop == 0
++        assert result["session_origin"]["minimum_pre_roll_available"] is False
++        assert context["status"] == "MEASUREMENT_INVALID"
++        assert "minimum pre/post-trigger context" in context["reason"]
++
++
++def test_zero_position_high_at_sample_zero_is_not_an_edge(tmp_path):
++    cap = _synthetic_cap(tmp_path, depth=20000, trigger_index=0,
++                         meta={"trigger_position_percent": 0})
++    session = tmp_path / "session"
++    result = materialize_session_from_headless(cap, session)
++    bits, rate = decode_session_channel(session, 3)
++    assert result["session_crop_start_samples"] == 0
++    assert extract_rising_edges(bits).tolist() == []
++    paired = _validate_pair(bits, bits, rate)
++    assert paired["measurement_valid"] is False
++    assert paired["delta_us"] is None
++
++
++@pytest.mark.parametrize("trigger", [100, 1000])
++def test_available_pre_roll_is_retained_without_padding(tmp_path, trigger):
++    from tools.task20_dl16_capture import classify_edge_result
++
++    cap = _synthetic_cap(tmp_path, depth=20000, trigger_index=trigger,
++                         meta={"trigger_position_percent": trigger / 200})
++    result = materialize_session_from_headless(cap, tmp_path / "session")
++    assert result["session_crop_start_samples"] == 0
++    assert result["trigger_depth_samples"] == trigger
++    assert result["session_origin"]["available_pre_roll_us"] == trigger / 10
++    context = classify_edge_result(
++        master_edges=[trigger], slave_edges=[trigger], sample_rate_hz=10_000_000,
++        capture_depth_samples=20000, trigger_depth_samples=trigger,
++        edge_policy=EDGE_POLICY_METRO_FIRST_WINDOW,
++    )
++    if trigger < 1000:
++        assert context["status"] == "MEASUREMENT_INVALID"
++    else:
++        assert context["status"] == "FIRST_PHYSICAL_EDGE_SMOKE_PASS"
++
++
++def test_unaligned_offset_only_and_padding_bits(tmp_path):
++    depth, trigger = 200003, 20003
++    cap = _synthetic_cap(tmp_path, depth=depth, trigger_index=trigger,
++                         meta={"trigger_offset": depth - trigger})
++    session = tmp_path / "session"
++    result = materialize_session_from_headless(cap, session)
++    bits3, rate = decode_session_channel(session, 3)
++    bits7, _ = decode_session_channel(session, 7)
++    assert result["session_crop_start_samples"] == 18000
++    assert result["trigger_depth_samples"] == 2003
++    assert len(bits3) == len(bits7) == depth - 18000
++    assert _validate_pair(bits3, bits7, rate)["measurement_valid"] is True
++    origin = json.loads((session / "headless-materialization.json").read_text())
++    assert origin == result["session_origin"]
++    assert origin["native_trigger_offset_post_samples"] == 180000
++    assert origin["trigger_index_source"] == "trigger_offset"
++    assert "TriggerSamplingDepth=2003" in (session / "channel.ini").read_text()
++
++
++@pytest.mark.parametrize("depth,position", [(10000, 0), (20000, 90), (64, 10)])
++def test_too_short_triggered_window_fails_before_output(tmp_path, depth, position):
++    cap = _synthetic_cap(tmp_path, depth=depth, trigger_index=depth * position // 100,
++                         meta={"trigger_position_percent": position})
++    session = tmp_path / "session"
++    with pytest.raises(ValueError, match="full metro first_window depth"):
++        materialize_session_from_headless(cap, session)
++    assert not session.exists()
++
++
++@pytest.mark.parametrize("mode", ["idle", "multiple", "late"])
++def test_crop_does_not_hide_invalid_in_window_geometry(tmp_path, mode):
++    depth, trigger = 200000, 20000
++    cap = _synthetic_cap(tmp_path, depth=depth, trigger_index=trigger,
++                         meta={"trigger_position_percent": 10})
++    wave = np.zeros(depth, dtype=np.uint8)
++    if mode == "multiple":
++        wave[trigger:trigger + 10] = 1
++        wave[trigger + 20:] = 1
++    elif mode == "late":
++        wave[trigger + 10001:] = 1
++    packed = np.packbits(wave, bitorder="little").tobytes()
++    for ch in (3, 7):
++        (cap / f"ch{ch:02d}.bits").write_bytes(packed)
++    session = tmp_path / "session"
++    materialize_session_from_headless(cap, session)
++    bits, rate = decode_session_channel(session, 3)
++    paired = _validate_pair(bits, bits, rate)
++    assert paired["measurement_valid"] is False
++    assert paired["delta_us"] is None
++
++
++@pytest.mark.parametrize("skew", [0, 1, 10, 11])
++def test_common_crop_preserves_delta_and_one_us_threshold(tmp_path, skew):
++    cap = _synthetic_cap(tmp_path, depth=200000, trigger_index=20000,
++                         meta={"trigger_position_percent": 10})
++    _write_step_bits(cap / "ch07.bits", 200000, 20000 + skew)
++    session = tmp_path / "session"
++    materialize_session_from_headless(cap, session)
++    bits3, rate = decode_session_channel(session, 3)
++    bits7, _ = decode_session_channel(session, 7)
++    result = _validate_pair(bits3, bits7, rate)
++    assert result["measurement_valid"] is True
++    assert result["master_ch3_sample"] == 2000
++    assert result["slave_ch7_sample"] == 2000 + skew
++    assert result["delta_us"] == pytest.approx(skew / 10)
++    assert result["within_1us_tolerance"] is (skew <= 10)
+--- /dev/null
++++ b/docs/handoff/2026-10-11-dl16-task-065-trigger-origin.md
+@@ -0,0 +1,33 @@
++# DL16-TASK-065 — headless 触发原点 / session 裁剪（2026-10-11）
++
++**交接：BLOCKED（完整指定测试命令）；裁剪离线结论 PASS；物理产品结论 UNVERIFIED，HIL_NOT_RUN。**
++主仓基线 `a1265070a513191669327b8ef241c664df480846`。已有大量 dirty 改动及未跟踪目标文件，未提交/覆盖他人工作；本任务增量另存于 DL16 仓 `scripts/patches/metro-headless-trigger-origin.patch`，提交标识 DL16-TASK-065。Controller/ACTIVE_TASK、FC、固件、B6、STALE_RESETS、S5Q 均未修改；硬件动作全为 0。
++
++## 裁剪公式和边界
++
++令有效深度为 `D`、实际采样率为 `R Hz`、原始触发下标为 `T`：
++`P = ceil(R * 2000 / 10000000)`（目标 200 µs）；
++`C = 8 * floor(max(0, T-P)/8)`；session 深度 `D-C`，ATK `TriggerSamplingDepth=T-C`。
++CH3/CH7 使用同一 `C`，`raw_index=session_index+C`，所以 delta 不变。
++10 MHz 时 `P=2000`；byte 对齐最多多保留 7 samples，不按波形搜索或挑选边沿。
++
++本 aligned-buffer profile 优先 `T=floor(D*trigger_position_percent/100)`；仅 offset 时 `T=D-trigger_offset`。CLI offset 是**触发后剩余**，绝不是 ATK 触发前深度。依据 [TASK-013 归档对齐记录](../../../atk-logic-mcp-dl16/docs/research/DL16-TASK-013-trigger-alignment.md)，两字段同时出现容许至多 7 samples 差异并保留原值；更大矛盾拒绝。该规则限于已对齐 Buffer，非 Stream 通用规则。
++
++0%/靠近开头保留实际可用预滚，不补样本，不把 sample 0 已高电平当 rising edge。原有 ≥100 µs pre/post-context gate 不变；不足仍无效。GUI/task20 边沿约 sample 17 与这里都是 session t=0 附近的语义，不要求数值相同。显式触发的剩余深度必须覆盖原有完整 1000 µs 窗（含其终点）；过短、通道长度不一致、元数据无效/矛盾、INCOMPLETE/UNKNOWN integrity 均在输出前拒绝。无 trigger 字段仅保留 legacy 未裁剪原点、标 UNKNOWN。未知来源不升级 REAL_HARDWARE。
++
++session 新增 `headless-materialization.json`：原始/裁后下标映射、字段优先级、实际预滚、源 meta/bit SHA-256；原 raw 副本仍保留。格式转换不是硬件质量或精度认证。
++
++## 验证与复算（在主仓执行；新目录，禁止覆盖）
++
++```powershell
++python -m pytest tests\tools\test_atk_dl16_headless_offline.py tests\tools\test_atk_dl16_metro_first_window_offline.py -q
++python artifacts\DL16-TASK-065\replay_trigger_origin.py --output artifacts\DL16-TASK-065\replay-new
++```
++
++- 两文件命令：**FAIL，62 passed / 1 failed**；失败 `test_prepare_retries_protocol_error_then_arms` 是 B6 基线不一致（info 次数期望 3/实际 2），原始源码+测试已复现，本次未改。
++- 加 edge-policy、paired-validation、replay、export 的范围回归，仅显式排除上述基线失败：**PASS，190 passed / 1 deselected**。0/10/50%、1/10/20 MHz、offset-only、非 byte 边界、预滚不足、短深度、元数据错误、空/多/迟边沿以及 1 µs 门槛均有测试。
++- 冻结 G2 shot1 只读复算：不裁 **FAIL**（两通道 late=[2000000]）；裁后 **PASS**（各 [2000]、delta=0.0、measurement_valid=true），与 R2 shot1 几何一致；FAIL/R2 所有文件 SHA-256 前后不变。只复算波形及已归档 ARM/STATUS，不重授硬件授权，不重写历史 verdict，不宣称完整物理证据包重新认证。
++- 精确命令/输出、基线、来源哈希在 [新任务证据](../../artifacts/DL16-TASK-065/)，结果 [replay.json](../../artifacts/DL16-TASK-065/replay-001/replay.json)。定向 compileall PASS，编辑器诊断无错误。
++
++**验收口令：给定 trigger_position=10% 的 headless raw，不改 first_window 阈值，materialize 后 metro_first_window 对 CH3/CH7 均为窗内单边沿；离线测试锁定该行为；未宣称物理 ≤1 µs 产品通过。**
++下一步：Controller 另案处置 B6 测试/实现不一致，随后独立 Reviewer 验收本增量；live 仍需新授权。
