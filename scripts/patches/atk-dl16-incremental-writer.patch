@@ -1,0 +1,123 @@
+diff --git a/core/include/atkdl16/incremental_packed_writer.h b/core/include/atkdl16/incremental_packed_writer.h
+new file mode 100644
+--- /dev/null
++++ b/core/include/atkdl16/incremental_packed_writer.h
+@@ -0,0 +1,118 @@
++#pragma once
++#include <algorithm>
++#include <array>
++#include <cstdint>
++#include <filesystem>
++#include <fstream>
++#include <stdexcept>
++#include <string>
++#include <vector>
++
++namespace atkdl16 {
++// Storage foundation only: unknown stream tails are retained, never promoted to samples.
++class IncrementalPackedWriter {
++public:
++    static constexpr uint64_t max_bytes = 200ULL * 1024 * 1024;
++    static constexpr size_t max_chunk = 65536;
++    static constexpr const char* tail_policy = "source-conflict-preserve-all-v1";
++private:
++    std::filesystem::path directory_;
++    std::vector<unsigned> channels_;
++    std::array<std::ofstream, 16> files_;
++    std::array<uint64_t, 16> bytes_{};
++    uint64_t requested_, rate_, budget_, total_{0};
++    bool closed_{false};
++    std::string evidence_, reason_{"ACTIVE_UNVERIFIED"};
++    void metadata() {
++        std::ofstream meta(directory_ / "stream_meta.json", std::ios::trunc);
++        if (!meta) throw std::runtime_error("metadata open failed");
++        meta << "{\"schema\":\"dl16-incremental-packed/v1\",\"status\":\"INCOMPLETE\","
++             << "\"data_integrity\":\"INCOMPLETE\",\"tail_status\":\"UNKNOWN\","
++             << "\"tail_policy\":\"" << tail_policy << "\",\"partial_uncropped\":true,"
++             << "\"edges_omitted\":true,\"evidence_source\":\"" << evidence_
++             << "\",\"reason\":\"" << reason_ << "\",\"sample_rate_hz\":" << rate_
++             << ",\"requested_samples\":" << requested_ << ",\"total_bytes\":" << total_
++             << ",\"channels\":[";
++        bool first = true;
++        for (unsigned ch : channels_) {
++            if (!first) meta << ',';
++            first = false;
++            meta << "{\"channel\":" << ch << ",\"stored_bytes\":" << bytes_[ch]
++                 << ",\"original_packed_start_sample_index\":0,\"original_packed_end_sample_index\":"
++                 << bytes_[ch] * 8 << ",\"valid_sample_count\":null}";
++        }
++        meta << "]}\n";
++        meta.flush();
++        if (!meta) throw std::runtime_error("metadata write failed");
++        meta.close();
++        if (meta.fail()) throw std::runtime_error("metadata close failed");
++    }
++public:
++    IncrementalPackedWriter(const std::filesystem::path& directory,
++                            std::vector<unsigned> channels, uint64_t rate,
++                            unsigned duration_ms, const std::string& evidence,
++                            uint64_t budget = max_bytes)
++        : directory_(directory), channels_(std::move(channels)),
++          requested_(rate * duration_ms / 1000), rate_(rate), budget_(budget), evidence_(evidence) {
++        auto sorted = channels_;
++        std::sort(sorted.begin(), sorted.end());
++        if (channels_.empty() || channels_.size() > 2 || sorted.back() > 15 ||
++            std::adjacent_find(sorted.begin(), sorted.end()) != sorted.end() ||
++            rate < 1 || rate > 20000000 || !duration_ms || duration_ms > 30000 ||
++            !budget || budget > max_bytes ||
++            (evidence != "SYNTHETIC_OFFLINE" && evidence != "UNKNOWN"))
++            throw std::invalid_argument("invalid bounded writer config");
++        if (!std::filesystem::create_directory(directory_))
++            throw std::runtime_error("destination exists");
++        for (unsigned ch : channels_) {
++            files_[ch].open(directory_ / ("ch" + std::to_string(ch) + ".packed.bin"), std::ios::binary);
++            if (!files_[ch]) throw std::runtime_error("packed file open failed");
++        }
++        metadata();
++    }
++    IncrementalPackedWriter(const IncrementalPackedWriter&) = delete;
++    IncrementalPackedWriter& operator=(const IncrementalPackedWriter&) = delete;
++    uint64_t total_bytes() const { return total_; }
++    void append(unsigned ch, const uint8_t* data, size_t length) {
++        if (closed_) throw std::runtime_error("writer closed");
++        if (std::find(channels_.begin(), channels_.end(), ch) == channels_.end() ||
++            length > max_chunk || (length && !data))
++            throw std::invalid_argument("invalid packed chunk");
++        if (length > budget_ - total_) {
++            finish("BYTE_CAP");
++            throw std::runtime_error("packed byte cap reached");
++        }
++        if (!length) return;
++        files_[ch].write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(length));
++        files_[ch].flush();
++        if (!files_[ch]) {
++            finish("WRITE_ERROR");
++            throw std::runtime_error("packed write/flush failed");
++        }
++        bytes_[ch] += length;
++        total_ += length;
++        metadata();
++    }
++    void finish(const std::string& reason) {
++        if (closed_) return;
++        if (reason != "CANCELLED" && reason != "BYTE_CAP" && reason != "WRITE_ERROR" &&
++            reason != "OWNER_ERROR" && reason != "TAIL_UNVERIFIED" && reason != "ABANDONED")
++            throw std::invalid_argument("invalid finish reason");
++        closed_ = true;
++        reason_ = reason;
++        bool failed = false;
++        for (unsigned ch : channels_) {
++            files_[ch].flush();
++            failed = failed || !files_[ch];
++            files_[ch].close();
++            failed = failed || files_[ch].fail();
++        }
++        if (failed) reason_ = "WRITE_ERROR";
++        metadata();
++        if (failed) throw std::runtime_error("packed flush/close failed");
++    }
++    ~IncrementalPackedWriter() {
++        if (!closed_) { try { finish("ABANDONED"); } catch (...) {} }
++    }
++};
++}

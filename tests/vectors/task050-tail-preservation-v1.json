@@ -1,0 +1,13 @@
+{
+  "schema": "dl16-tail-preservation-vectors/v1",
+  "policy": "source-conflict-preserve-all-v1",
+  "source_review": "docs/research/LHX369963-dl16-cli-cross-validation-2026-10-10.md#r4--high--order-3-start-cropping-sample-tails-and-shared-timebase",
+  "source_pin": "LHX369963/dl16-cli@8d7c209c1e3b13923620bb34cec915291a749612",
+  "evidence_source": "SYNTHETIC_OFFLINE",
+  "boundary": "Approximate reported counts are hypotheses, NOT validated trailer removal rules. Independently constructed vectors must preserve ALL bytes and remain INCOMPLETE/UNKNOWN.",
+  "vectors": [
+    {"mode": "tail8", "reported_mode": "Stream", "requested_samples": 1000, "packed_depth_bytes": 125, "candidate_extra_bytes": 8, "stored_bytes": 133},
+    {"mode": "tail12", "reported_mode": "Buffer", "requested_samples": 1000, "packed_depth_bytes": 125, "candidate_extra_bytes": 12, "stored_bytes": 137},
+    {"mode": "tail1", "reported_mode": "Buffer+RLE expanded", "requested_samples": 1000, "packed_depth_bytes": 125, "candidate_extra_bytes": 1, "stored_bytes": 126}
+  ]
+}

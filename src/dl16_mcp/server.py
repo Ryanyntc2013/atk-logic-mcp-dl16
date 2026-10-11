@@ -8,6 +8,12 @@ mcp = FastMCP("atk-logic-mcp-dl16")
 
 
 @mcp.tool()
+def logic_stream_start(experimental_opt_in: bool = False) -> dict:
+    """Unavailable live Stream boundary: opt-in still fails until tail semantics are verified."""
+    return service.logic_stream_start(experimental_opt_in)
+
+
+@mcp.tool()
 def logic_buffer_start(channels: list[int], sample_rate_hz: int = 20_000_000,
                        duration_ms: int = 20, threshold_voltage: float = 1.6,
                        trigger_timeout_sec: int = 30) -> dict:

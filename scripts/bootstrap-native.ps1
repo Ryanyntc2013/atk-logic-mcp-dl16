@@ -96,6 +96,15 @@ git -C $Dst apply $AsyncPatch
 if ($LASTEXITCODE -ne 0) { throw 'Async BUFFER patch apply failed' }
 Copy-Item -LiteralPath (Join-Path $RepoRoot 'scripts\async_dispatcher.h') -Destination (Join-Path $Dst 'cli\async_dispatcher.h') -Force
 
+# TASK-050 storage-only foundation: no live Stream capability or capture routing.
+$WriterHeader = Join-Path $Dst 'core\include\atkdl16\incremental_packed_writer.h'
+if (Test-Path $WriterHeader) { Remove-Item -LiteralPath $WriterHeader -Force }
+$WriterPatch = Join-Path $RepoRoot 'scripts\patches\atk-dl16-incremental-writer.patch'
+git -C $Dst apply --check $WriterPatch
+if ($LASTEXITCODE -ne 0) { throw 'Incremental writer patch check failed' }
+git -C $Dst apply $WriterPatch
+if ($LASTEXITCODE -ne 0) { throw 'Incremental writer patch apply failed' }
+
 if (-not $SkipBuild) {
   # Prefer the requested toolset only when it is actually installed on this machine;
   # otherwise fall back to the installed default (let CMake pick v143).

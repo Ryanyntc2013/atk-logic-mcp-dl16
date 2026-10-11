@@ -31,6 +31,9 @@ public:
             return;
         }
         std::unique_lock<std::mutex> lock(mutex_);
+        if(cmd=="stream_start" || cmd=="stream_poll" || cmd=="stream_cancel") {
+            lock.unlock(); output(error_response(id,"STREAM_TAIL_UNVERIFIED","live Stream unavailable: incremental writer foundation only")); return;
+        }
         if(cmd=="capture_poll" || cmd=="capture_cancel") {
             std::string op;
             if(!get_string(req,"operation_id",op) || op!=operation_ || op.empty()) {

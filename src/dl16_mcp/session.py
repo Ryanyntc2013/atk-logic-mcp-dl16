@@ -251,6 +251,8 @@ class NativeSession:
             self._start()
             if not self._hello:
                 raise SessionFailure("SESSION_PROTOCOL_ERROR", "native hello handshake missing")
+            if request.get("command") in {"stream_start", "stream_poll", "stream_cancel"}:
+                raise SessionFailure("STREAM_TAIL_UNVERIFIED", "Live Stream is unavailable; native incremental writer is an offline foundation only")
             if request.get("command") in {"capture_start", "capture_poll", "capture_cancel"} and "async_buffer_v1" not in self.capabilities:
                 raise SessionFailure("NATIVE_CAPABILITY_MISSING", "native hello does not advertise cancellable async BUFFER v1")
             if request.get("command") == "pwm" and "pwm" not in self.capabilities:

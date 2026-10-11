@@ -1,3 +1,16 @@
+# Latest continuation — TASK-050, 2026-10-11
+
+Offline native incremental packed storage foundation DONE; **live Stream BLOCKED**
+by unresolved source-reported approximate tails/crop semantics. Tracked bootstrap
+patch, actual USB-free writer + production owner dispatcher tests prove incremental
+disk visibility, bounded direct writes, cancel/EOF and fail-closed INCOMPLETE
+provenance. No live Stream capability, no BUFFER alias. Explicit unavailable MCP
+start boundary rejects even opt-in before launch; legacy workers reject before
+dispatch. Full venv suite **261 passed**, compileall passed, native bootstrap
+`-SkipTests` and harness built. No hardware/no commit. Parent: do not run live
+Stream; next resolve versioned tail/offset evidence before integration. Exact scope,
+commands/hashes and HIL gate: tasks/DL16-TASK-050-incremental-packed-foundation.md.
+
 # Latest continuation - TASK-049, 2026-10-11
 
 Genuine opt-in asynchronous cancellable BUFFER foundation added, NOT Stream. Single native Device owner thread, atomic cancellation, capability-gated host/MCP start/poll/cancel, bounded retained bytes and fail-closed partial artifacts. Offline only: no USB, no commit. Full suite 250 passed; compileall passed. Stream incremental persistence/tails/backpressure remain BLOCKED; parent cancellation HIL required. See tasks/DL16-TASK-049-async-buffer-foundation.md for exact parent invocation and limitations.

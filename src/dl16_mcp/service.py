@@ -13,6 +13,11 @@ from .config import CAPTURE_ID_RE, CaptureRequest, captures_dir, exports_dir
 from .decoders import decode_i2c, decode_spi, decode_uart
 
 
+def logic_stream_start(experimental_opt_in: bool = False) -> dict[str, Any]:
+    """Expose the explicit blocked boundary, not a BUFFER alias or live capability."""
+    return backend.stream_start(experimental_opt_in=experimental_opt_in)
+
+
 def logic_status() -> dict[str, Any]:
     return backend.status()
 

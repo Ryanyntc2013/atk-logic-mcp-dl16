@@ -339,6 +339,13 @@ def close_session() -> dict[str, Any]:
         return {"success": False, "closed": True, "error_code": exc.code, "message": str(exc)}
 
 
+def stream_start(*, experimental_opt_in: bool = False) -> dict[str, Any]:
+    """Fail before worker launch: no validated native live Stream implementation exists."""
+    return {"success": False, "error_code": "STREAM_TAIL_UNVERIFIED" if experimental_opt_in is True else "EXPERIMENTAL_OPT_IN_REQUIRED",
+            "message": "Native incremental packed writer is offline-only; live Stream tail/crop semantics remain blocked",
+            "stream_available": False}
+
+
 def buffer_start(request: CaptureRequest, trigger_timeout_sec: int = 30) -> dict[str, Any]:
     """Start opt-in bounded BUFFER; never advertise or silently select Stream."""
     try:

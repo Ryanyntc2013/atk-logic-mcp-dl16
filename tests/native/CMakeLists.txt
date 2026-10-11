@@ -26,6 +26,10 @@ target_link_libraries(dl16-vector-dump PRIVATE
     Advapi32
 )
 
+add_executable(dl16-incremental-writer-test incremental_writer_test.cpp)
+target_include_directories(dl16-incremental-writer-test PRIVATE "${UP}/core/include" "${UP}/cli" "${CMAKE_CURRENT_SOURCE_DIR}/../../scripts")
+target_link_libraries(dl16-incremental-writer-test PRIVATE "${UP}/build/Release/atkdl16_core.lib")
+
 add_executable(dl16-async-buffer-test async_buffer_test.cpp)
 target_include_directories(dl16-async-buffer-test PRIVATE "${UP}/core/include" "${UP}/cli" "${CMAKE_CURRENT_SOURCE_DIR}/../../scripts")
 target_link_libraries(dl16-async-buffer-test PRIVATE "${UP}/build/Release/atkdl16_core.lib")

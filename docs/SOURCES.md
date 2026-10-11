@@ -1,5 +1,19 @@
 # Upstream provenance and reuse matrix (2026-10-10)
 
+## TASK-050 incremental packed storage boundary
+
+Independently authored native storage header is persisted as the tracked bootstrap
+patch `scripts/patches/atk-dl16-incremental-writer.patch`. It uses C++ standard
+filesystem/streams, not LHX implementation code. Tail evidence remains the pinned
+TASK-002 R4 review: LHX `8d7c209c1e3b13923620bb34cec915291a749612` reports approximate
+Stream/Buffer/RLE extras (~8/~12/~1 expanded bytes), not validated removal rules.
+`tests/vectors/task050-tail-preservation-v1.json` independently constructs those
+candidate excesses and verifies preserve-all UNKNOWN/INCOMPLETE behavior in the
+actual native writer. No bytes removed, no live Stream capability or local HIL
+claim; no third-party copying/translation. See
+[TASK-050 scope and evidence](tasks/DL16-TASK-050-incremental-packed-foundation.md).
+
+
 | Project | Pin | License | How used here |
 |---|---|---|---|
 | [ALIENTEK atk-logic](https://github.com/alientek-openedv/atk-logic) | `0dff562d24436def2bec3791684f1911997b9e35` | GPL-3.0-or-later | USB/FPGA/trigger protocol ground truth; reference checkout only |
