@@ -114,6 +114,16 @@ if ($LASTEXITCODE -ne 0) { throw 'Experimental Stream patch check failed' }
 git -C $Dst apply $StreamPatch
 if ($LASTEXITCODE -ne 0) { throw 'Experimental Stream patch apply failed' }
 
+# TASK-066 must remain last: Buffer transport carry and pre-dispatch help guard.
+# Remove only this patch-owned untracked header to permit repeated bootstrap.
+$CliEntryHeader = Join-Path $Dst 'cli\cli_entry.h'
+if (Test-Path $CliEntryHeader) { Remove-Item -LiteralPath $CliEntryHeader -Force }
+$BufferResiduePatch = Join-Path $RepoRoot 'scripts\patches\atk-dl16-buffer-residue.patch'
+git -C $Dst apply --check $BufferResiduePatch
+if ($LASTEXITCODE -ne 0) { throw 'Buffer residue/help patch check failed' }
+git -C $Dst apply $BufferResiduePatch
+if ($LASTEXITCODE -ne 0) { throw 'Buffer residue/help patch apply failed' }
+
 if (-not $SkipBuild) {
   # Prefer the requested toolset only when it is actually installed on this machine;
   # otherwise fall back to the installed default (let CMake pick v143).

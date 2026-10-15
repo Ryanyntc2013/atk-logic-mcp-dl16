@@ -1,0 +1,453 @@
+diff --git a/cli/cli_entry.h b/cli/cli_entry.h
+new file mode 100644
+--- /dev/null
++++ b/cli/cli_entry.h
+@@ -0,0 +1,17 @@
++#pragma once
++#include <string>
++
++namespace atkdl16::cli {
++// Keep this outside every subcommand, including enumeration and session startup.
++template<class Usage, class Dispatch>
++int entry(int argc, char* argv[], Usage usage, Dispatch dispatch) {
++    for (int i = 1; i < argc; ++i) {
++        const std::string arg = argv[i];
++        if (arg == "--help" || arg == "-h") {
++            usage();
++            return 0;
++        }
++    }
++    return dispatch(argc, argv);
++}
++} // namespace atkdl16::cli
+diff --git a/cli/main.cpp b/cli/main.cpp
+--- a/cli/main.cpp
++++ b/cli/main.cpp
+@@ -4,6 +4,7 @@
+ #include "atkdl16/sample_store.h"
+ #include "atkdl16/json_util.h"
+ #include "session_protocol.h"
++#include "cli_entry.h"
+ #include "async_dispatcher.h"
+ #include <algorithm>
+ #include <iostream>
+@@ -263,20 +264,23 @@
+               << "  --duration <ms>               Capture duration (e.g. 20ms, 100ms, default: 20ms)\n"
+               << "  --threshold <voltage>         Comparator threshold voltage (e.g. 1.6, default: 1.6)\n"
+               << "  --mode <buffer|stream>        Capture mode (buffer = standard, stream = experimental, default: buffer)\n"
+-              << "  --trigger <ch:edge>           Trigger spec (e.g. ch0:rising, immediate, default: immediate)\n"
++              << "  --trigger <ch:edge>           Trigger spec (e.g. ch0:rising, immediate, default: legacy no-predicate configuration)\n"
+               << "  --out <dir>                   Output directory for captures (default: captures)\n"
+               << "  --raw-rx-path <absolute-file> Raw capture RX records (exclusive create; opt-in)\n"
+               << "  --raw-rx-max-bytes <8..33554432> Total file cap (default: 33554432)\n"
+               << "  --json                        Output machine-readable JSON to stdout (default: off)\n";
+ }
+ 
+-int main(int argc, char* argv[]) {
++static int dispatch_command(int argc, char* argv[]) {
+     if (argc < 2) {
+         print_usage();
+         return 0;
+     }
+ 
+     std::string cmd = argv[1];
++    if ((cmd == "list" || cmd == "info" || cmd == "capabilities") && argc != 2) {
++        std::cerr << "Unexpected command arguments\n"; return 1;
++    }
+     if(cmd=="capabilities") { std::cout << "{\"raw_rx_log\":\"dl16-raw-rx/v1\"}\n"; return 0; }
+     if(cmd=="session"&&argc==3&&std::string(argv[2])=="--jsonl")return run_session_jsonl();
+ 
+@@ -336,15 +340,21 @@
+                 config.threshold_voltage = std::stod(argv[++i]);
+             } else if (arg == "--mode" && i + 1 < argc) {
+                 std::string m = argv[++i];
++                if (m != "stream" && m != "buffer") { std::cerr << "Invalid capture mode\n"; return 1; }
+                 config.mode = (m == "stream") ? CaptureMode::Stream : CaptureMode::Buffer;
+             } else if (arg == "--trigger" && i + 1 < argc) {
+-                config.trigger = parse_trigger(argv[++i]);
++                const std::string spec = argv[++i];
++                if (!valid_session_trigger(spec)) { std::cerr << "Invalid trigger\n"; return 1; }
++                config.trigger = parse_trigger(spec);
+             } else if (arg == "--trigger-position" && i + 1 < argc) {
+                 config.trigger.position_percent = std::stod(argv[++i]);
+             } else if (arg == "--trigger-timeout" && i + 1 < argc) {
+                 trigger_timeout_sec = std::stoi(argv[++i]);
+             } else if (arg == "--out" && i + 1 < argc) {
+                 out_dir = argv[++i];
++            } else {
++                std::cerr << "Unknown or missing capture argument: " << arg << "\n";
++                return 1;
+             }
+         }
+ 
+@@ -421,6 +431,9 @@
+                 capture_id = argv[++i];
+             } else if (arg == "--dir" && i + 1 < argc) {
+                 dir = argv[++i];
++            } else {
++                std::cerr << "Unknown or missing inspect argument: " << arg << "\n";
++                return 1;
+             }
+         }
+         if (capture_id.empty()) {
+@@ -452,5 +465,9 @@
+     }
+ 
+     print_usage();
+-    return 0;
+-}
++    return 1;
++}
++
++int main(int argc, char* argv[]) {
++    return cli::entry(argc, argv, print_usage, dispatch_command);
++}
+diff --git a/core/include/atkdl16/protocol.h b/core/include/atkdl16/protocol.h
+--- a/core/include/atkdl16/protocol.h
++++ b/core/include/atkdl16/protocol.h
+@@ -18,6 +18,34 @@
+ // len must be an integer multiple of 2048
+ void convert_to_device(const void* src, void* dst, size_t len);
+ 
++// Raw USB transport partitions are independent of 2048-byte FPGA banks.
++class RawBankAccumulator {
++public:
++    void push(const uint8_t* data, size_t length, std::vector<uint8_t>& converted) {
++        if (length) pending_.insert(pending_.end(), data, data + length);
++        const size_t aligned = pending_.size() / USB_BLOCK_SIZE * USB_BLOCK_SIZE;
++        converted.resize(aligned);
++        if (aligned) {
++            convert_to_pc(pending_.data(), converted.data(), aligned);
++            pending_.erase(pending_.begin(), pending_.begin() + aligned);
++        }
++    }
++    size_t pending_bytes() const { return pending_.size(); }
++    // Call on every exit. Residue is raw transport data, never valid samples.
++    void mark_terminal(CaptureResult& result) const {
++        result.raw_bank_residue_bytes = pending_bytes();
++        if (!pending_bytes()) return;
++        result.success = false;
++        result.data_integrity = DataIntegrity::Incomplete;
++        if (result.error_code == ErrorCode::Ok) {
++            result.error_code = ErrorCode::IncompleteCapture;
++            result.error_message = "Capture ended with an incomplete raw USB bank";
++        }
++    }
++private:
++    std::vector<uint8_t> pending_;
++};
++
+ // Frequency <-> 1-based hardware code conversion
+ uint8_t sample_rate_to_code(uint64_t rate_hz);
+ uint64_t code_to_sample_rate(uint8_t code);
+diff --git a/core/include/atkdl16/types.h b/core/include/atkdl16/types.h
+--- a/core/include/atkdl16/types.h
++++ b/core/include/atkdl16/types.h
+@@ -234,6 +234,7 @@
+     CaptureConfig config;
+     CaptureDiagnostics diagnostics;
+     RawRxLog raw_rx_log;
++    uint64_t raw_bank_residue_bytes{0}; // Unconverted 0..2047 bytes; never samples.
+     bool cleanup_stop_attempted{false}, cleanup_stop_ok{false};
+ 
+     DataIntegrity data_integrity{DataIntegrity::Unknown};
+diff --git a/core/src/capture.cpp b/core/src/capture.cpp
+--- a/core/src/capture.cpp
++++ b/core/src/capture.cpp
+@@ -51,7 +51,9 @@
+ 
+     RawRxWriter raw_log(result.raw_rx_log);
+     SampleStore store(config);
++    RawBankAccumulator raw_banks;
+     auto finalize = [&]() {
++        raw_banks.mark_terminal(result);
+         if (cancellation && !result.success) {
+             result.data_integrity=DataIntegrity::Incomplete;
+             result.requested_samples=config.total_samples();
+@@ -162,7 +164,10 @@
+         size_t actual_len = 0;
+         err = m_device.transport().read_bulk(EP_BULK_IN, raw_buf.data(), raw_buf.size(), actual_len, 200);
+         result.diagnostics.observe_read(actual_len);
+-        if (!raw_log.append(raw_buf.data(), actual_len, err.code)) {
++        const bool raw_log_ok = raw_log.append(raw_buf.data(), actual_len, err.code);
++        // Preserve every positive read, including timeout-with-bytes returns.
++        raw_banks.push(raw_buf.data(), actual_len, conv_buf);
++        if (!raw_log_ok) {
+             stop(); m_state=CaptureState::Error; return finalize();
+         }
+         if (!err && err.code == ErrorCode::DeviceDisconnected) {
+@@ -172,13 +177,9 @@
+             return finalize();
+         }
+ 
+-        if (actual_len >= USB_BLOCK_SIZE) {
+-            size_t aligned_len = (actual_len / USB_BLOCK_SIZE) * USB_BLOCK_SIZE;
+-            if (conv_buf.size() < aligned_len) {
+-                conv_buf.resize(aligned_len);
+-            }
+-            convert_to_pc(raw_buf.data(), conv_buf.data(), aligned_len);
+-            parser.push_bytes(conv_buf.data(), aligned_len);
++        // Only complete banks reach the parser; carry stays owned by this capture.
++        if (!conv_buf.empty()) {
++            parser.push_bytes(conv_buf.data(), conv_buf.size());
+ 
+             // Process parsed frames
+             while (parser.has_message()) {
+@@ -298,6 +299,12 @@
+         return finalize();
+     }
+ 
++    if (raw_banks.pending_bytes()) {
++        raw_banks.mark_terminal(result);
++        m_state = CaptureState::Error;
++        return finalize();
++    }
++
+     if (!result.trigger_ack_received) {
+         result.data_integrity = DataIntegrity::Incomplete;
+         result.success = false;
+diff --git a/core/src/json_util.cpp b/core/src/json_util.cpp
+--- a/core/src/json_util.cpp
++++ b/core/src/json_util.cpp
+@@ -82,6 +82,7 @@
+            << "  \"message\": \"" << json_escape(result.error_message) << "\",\n"
+            << "  \"evidence_source\": \"REAL_HARDWARE\",\n"
+            << "  \"data_integrity\": \"" << json_escape(to_string(result.data_integrity)) << "\",\n"
++           << "  \"raw_bank_residue_bytes\": " << result.raw_bank_residue_bytes << ",\n"
+            << "  \"capture_complete_received\": " << (result.capture_complete_received ? "true" : "false") << ",\n"
+            << "  \"artifact_dir\": \"" << json_escape(artifact_path) << "\",\n"
+            << "  \"warnings\": [";
+@@ -103,6 +104,7 @@
+        << "  \"capture_id\": \"" << json_escape(result.capture_id) << "\",\n"
+        << "  \"evidence_source\": \"REAL_HARDWARE\",\n"
+        << "  \"data_integrity\": \"" << json_escape(to_string(result.data_integrity)) << "\",\n"
++       << "  \"raw_bank_residue_bytes\": " << result.raw_bank_residue_bytes << ",\n"
+        << "  \"requested_samples\": " << result.requested_samples << ",\n"
+        << "  \"minimum_actual_samples\": " << result.minimum_actual_samples << ",\n"
+        << "  \"actual_samples_per_channel\": {\n";
+diff --git a/core/src/sample_store.cpp b/core/src/sample_store.cpp
+--- a/core/src/sample_store.cpp
++++ b/core/src/sample_store.cpp
+@@ -348,6 +348,7 @@
+         if (result) {
+             meta_out << "  \"evidence_source\": \"REAL_HARDWARE\",\n";
+             meta_out << "  \"data_integrity\": \"" << json_escape(to_string(result->data_integrity)) << "\",\n";
++            meta_out << "  \"raw_bank_residue_bytes\": " << result->raw_bank_residue_bytes << ",\n";
+             meta_out << "  \"requested_samples\": " << result->requested_samples << ",\n";
+             meta_out << "  \"actual_samples\": " << result->actual_samples << ",\n";
+             meta_out << "  \"trigger_offset\": " << result->trigger_offset << ",\n";
+diff --git a/tests/unit/test_main.cpp b/tests/unit/test_main.cpp
+--- a/tests/unit/test_main.cpp
++++ b/tests/unit/test_main.cpp
+@@ -1,5 +1,6 @@
+ #include "test_harness.h"
+ #include "atkdl16/protocol.h"
++#include "../../cli/cli_entry.h"
+ #include "atkdl16/rx_parser.h"
+ #include "atkdl16/rle.h"
+ #include "atkdl16/capability.h"
+@@ -663,15 +664,193 @@
+ // Main Test Runner
+ // ============================================================================
+ 
+-int main() {
++
++// TASK-066: independently constructed bank bytes and transport partitions.
++static std::vector<uint8_t> bank_fixture(size_t banks) {
++    std::vector<uint8_t> raw(banks * USB_BLOCK_SIZE);
++    for (size_t i = 0; i < raw.size(); ++i)
++        raw[i] = static_cast<uint8_t>((i * 37 + i / 251 + i / 2048 * 19) & 255);
++    return raw;
++}
++static std::vector<uint8_t> converted_partition(const std::vector<uint8_t>& raw,
++                                               const std::vector<size_t>& chunks,
++                                               size_t& pending) {
++    RawBankAccumulator banks;
++    std::vector<uint8_t> all, converted;
++    size_t pos = 0;
++    for (size_t length : chunks) {
++        ASSERT_TRUE(pos + length <= raw.size());
++        banks.push(raw.data() + pos, length, converted);
++        ASSERT_TRUE(banks.pending_bytes() < USB_BLOCK_SIZE);
++        all.insert(all.end(), converted.begin(), converted.end());
++        pos += length;
++    }
++    ASSERT_EQ(pos, raw.size());
++    pending = banks.pending_bytes();
++    return all;
++}
++TEST_CASE(test_buffer_fragmented_14848_and_timeout_bytes) {
++    auto raw = bank_fixture(16);
++    std::vector<uint8_t> expected(raw.size());
++    convert_to_pc(raw.data(), expected.data(), raw.size());
++    size_t pending = 0;
++    // read_bulk maps timeout-with-positive-length to Error::ok; these exact
++    // lengths are therefore passed to the same accumulator, including empty timeouts.
++    auto actual = converted_partition(raw, {14848, 0, 512, 1024, 16384}, pending);
++    ASSERT_TRUE(actual == expected);
++    ASSERT_EQ(pending, size_t{0});
++}
++TEST_CASE(test_buffer_every_two_way_split) {
++    auto raw = bank_fixture(2);
++    std::vector<uint8_t> expected(raw.size());
++    convert_to_pc(raw.data(), expected.data(), raw.size());
++    for (size_t split = 0; split <= raw.size(); ++split) {
++        size_t pending = 0;
++        ASSERT_TRUE(converted_partition(raw, {split, 0, raw.size() - split}, pending) == expected);
++        ASSERT_EQ(pending, size_t{0});
++    }
++}
++TEST_CASE(test_buffer_single_byte_and_aligned_reads) {
++    auto raw = bank_fixture(4);
++    std::vector<uint8_t> expected(raw.size());
++    convert_to_pc(raw.data(), expected.data(), raw.size());
++    size_t pending = 0;
++    ASSERT_TRUE(converted_partition(raw, std::vector<size_t>(raw.size(), 1), pending) == expected);
++    ASSERT_EQ(pending, size_t{0});
++    ASSERT_TRUE(converted_partition(raw, {2048, 4096, 2048}, pending) == expected);
++}
++TEST_CASE(test_buffer_terminal_residue_never_converted) {
++    for (size_t tail = 1; tail < USB_BLOCK_SIZE; ++tail) {
++        auto raw = bank_fixture(2);
++        raw.resize(USB_BLOCK_SIZE + tail);
++        std::vector<uint8_t> expected(USB_BLOCK_SIZE);
++        convert_to_pc(raw.data(), expected.data(), expected.size());
++        size_t pending = 0;
++        auto actual = converted_partition(raw, {512, 0, raw.size() - 512}, pending);
++        ASSERT_TRUE(actual == expected);
++        ASSERT_EQ(pending, tail);
++    }
++}
++
++
++TEST_CASE(test_buffer_fragmented_message_order_and_payload) {
++    // Put ACK, Offset, data (cross-bank), Progress and Complete in PC byte order.
++    std::vector<uint8_t> pc;
++    const std::vector<uint8_t> orders = {4, 3, 1, 5, 6};
++    const std::vector<std::vector<uint8_t>> payloads = {
++        {0, 0, 0x12, 3}, std::vector<uint8_t>(88, 0),
++        std::vector<uint8_t>(5000, 0xA5), std::vector<uint8_t>(8, 0), {0, 0}
++    };
++    for (size_t i = 0; i < orders.size(); ++i) {
++        auto frame = make_synthetic_rx_frame(orders[i], payloads[i]);
++        pc.insert(pc.end(), frame.begin(), frame.end());
++    }
++    pc.resize((pc.size() + USB_BLOCK_SIZE - 1) / USB_BLOCK_SIZE * USB_BLOCK_SIZE, 0);
++    std::vector<uint8_t> raw(pc.size());
++    convert_to_device(pc.data(), raw.data(), pc.size());
++    // Deterministic many-read partitions spanning every lane and multiple banks.
++    for (size_t step : {size_t{1}, size_t{7}, size_t{511}, size_t{512}, size_t{1536}, size_t{2047}, size_t{2048}, size_t{4095}}) {
++        std::vector<size_t> chunks;
++        for (size_t left = raw.size(); left;) {
++            const auto length = std::min(step, left);
++            chunks.push_back(length);
++            chunks.push_back(0);
++            left -= length;
++        }
++        size_t pending = 0;
++        auto converted = converted_partition(raw, chunks, pending);
++        ASSERT_TRUE(converted == pc);
++        RxParser parser;
++        parser.push_bytes(converted.data(), converted.size());
++        for (size_t i = 0; i < orders.size(); ++i) {
++            auto message = parser.pop_message();
++            ASSERT_TRUE(message.has_value());
++            ASSERT_EQ(static_cast<uint8_t>(message->type), orders[i]);
++            ASSERT_TRUE(message->payload == payloads[i]);
++        }
++        ASSERT_FALSE(parser.has_message());
++        ASSERT_EQ(pending, size_t{0});
++    }
++}
++TEST_CASE(test_buffer_terminal_policy_and_json) {
++    for (const size_t tail : {size_t{0}, size_t{1}, size_t{512}, size_t{1024}, size_t{1536}, size_t{2047}}) {
++        RawBankAccumulator banks;
++        std::vector<uint8_t> bytes(tail, 0xAA), converted;
++        banks.push(bytes.data(), bytes.size(), converted);
++        ASSERT_TRUE(converted.empty());
++        CaptureResult result;
++        result.success = true;
++        result.data_integrity = DataIntegrity::Complete;
++        result.actual_samples = 64;
++        banks.mark_terminal(result);
++        ASSERT_EQ(result.raw_bank_residue_bytes, tail);
++        ASSERT_EQ(result.actual_samples, uint64_t{64});
++        ASSERT_TRUE(result.success == (tail == 0));
++        ASSERT_TRUE(result.data_integrity == (tail ? DataIntegrity::Incomplete : DataIntegrity::Complete));
++        auto json = serialize_capture_result_json(result, "");
++        ASSERT_TRUE(json.find("\"raw_bank_residue_bytes\": " + std::to_string(tail)) != std::string::npos);
++        if (tail) {
++            ASSERT_TRUE(result.error_code == ErrorCode::IncompleteCapture);
++            result.error_code = ErrorCode::CaptureTimeout;
++            result.error_message = "primary timeout";
++            banks.mark_terminal(result);
++            ASSERT_TRUE(result.error_code == ErrorCode::CaptureTimeout);
++            ASSERT_EQ(result.error_message, std::string("primary timeout"));
++        }
++    }
++}
++TEST_CASE(test_cli_help_never_dispatches_to_device) {
++    for (const std::string command : {"capture", "list", "info", "inspect", "session", "capabilities", "unknown"}) {
++        for (const std::string flag : {"--help", "-h"}) {
++            for (int position = 1; position <= 4; ++position) {
++                std::vector<std::string> args = {"atk-dl16", command, "--duration", "20ms"};
++                args.insert(args.begin() + position, flag);
++                std::vector<char*> argv;
++                for (auto& arg : args) argv.push_back(arg.data());
++                int dispatches = 0, usages = 0;
++                int rc = cli::entry(static_cast<int>(argv.size()), argv.data(),
++                    [&]() { ++usages; }, [&](int, char**) { ++dispatches; return 99; });
++                ASSERT_EQ(rc, 0);
++                ASSERT_EQ(usages, 1);
++                ASSERT_EQ(dispatches, 0);
++            }
++        }
++    }
++}
++TEST_CASE(test_cli_without_help_preserves_dispatch) {
++    char name[] = "atk-dl16", command[] = "capture";
++    char* argv[] = {name, command};
++    int dispatches = 0;
++    ASSERT_EQ(cli::entry(2, argv, []() {}, [&](int argc, char**) {
++        ++dispatches; ASSERT_EQ(argc, 2); return 37;
++    }), 37);
++    ASSERT_EQ(dispatches, 1);
++}
++
++int main(int argc, char* argv[]) {
++    // Offline by default: hardware access requires an explicit separate invocation.
++    bool hardware = false;
++    std::string filter;
++    for (int i = 1; i < argc; ++i) {
++        std::string arg = argv[i];
++        if (arg == "--hardware") hardware = true;
++        else if (arg == "--offline") hardware = false;
++        else if (arg == "--filter" && i + 1 < argc) filter = argv[++i];
++        else return 2;
++    }
+     std::cout << "========================================" << std::endl;
+     std::cout << "  ATK-DL16 Unit & Synthetic Test Suite  " << std::endl;
+     std::cout << "========================================" << std::endl;
+ 
+     const auto& tests = atkdl16::test::get_registry();
+-    size_t passed = 0;
++    size_t passed = 0, skipped = 0;
+ 
+     for (const auto& t : tests) {
++        if ((!hardware && t.name == "test_device_open_hardware") ||
++            (!filter.empty() && t.name.find(filter) == std::string::npos)) {
++            ++skipped;
++            continue;
++        }
+         std::cout << "[ RUN      ] " << t.name << std::endl;
+         t.func();
+         std::cout << "[       OK ] " << t.name << std::endl;
+@@ -679,7 +858,7 @@
+     }
+ 
+     std::cout << "========================================" << std::endl;
+-    std::cout << "  RESULTS: " << passed << "/" << tests.size() << " tests passed." << std::endl;
++    std::cout << "  RESULTS: " << passed << "/" << (tests.size() - skipped) << " tests passed; " << skipped << " skipped." << std::endl;
+     std::cout << "========================================" << std::endl;
+ 
+     return 0;

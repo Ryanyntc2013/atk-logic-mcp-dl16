@@ -80,6 +80,27 @@ def test_capture_does_not_retry_incomplete_evidence(monkeypatch, tmp_path):
     assert m.call_count == 1
 
 
+def test_buffer_raw_bank_residue_failure_preserved_without_retry(monkeypatch, tmp_path):
+    _cli_file(monkeypatch, tmp_path)
+    monkeypatch.setenv("DL16_BACKEND_MODE", "oneshot")
+    payload = {"success": False, "error_code": "INCOMPLETE_CAPTURE",
+               "message": "Capture ended with an incomplete raw USB bank",
+               "data_integrity": "INCOMPLETE", "raw_bank_residue_bytes": 512,
+               "capture_complete_received": True}
+
+    class Result:
+        returncode = 1
+        stdout = json.dumps(payload)
+        stderr = ""
+
+    with patch("dl16_mcp.backend.subprocess.run", return_value=Result()) as run:
+        result = backend.capture(CaptureRequest())
+    assert run.call_count == 1
+    assert result["success"] is False
+    assert result["data_integrity"] == "INCOMPLETE"
+    assert result["raw_bank_residue_bytes"] == 512
+
+
 def test_status_retries_once_on_device_info_open_error(monkeypatch, tmp_path):
     _cli_file(monkeypatch, tmp_path)
 
