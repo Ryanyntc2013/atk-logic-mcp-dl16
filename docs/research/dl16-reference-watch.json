@@ -1,0 +1,48 @@
+{
+  "schema": "dl16-reference-watch/v1",
+  "reviewed_at": "2026-10-17",
+  "repositories": [
+    {
+      "key": "VENDOR",
+      "repo": "alientek-openedv/atk-logic",
+      "branch": "master",
+      "pin": "0dff562d24436def2bec3791684f1911997b9e35"
+    },
+    {
+      "key": "VENDOR_SRD",
+      "repo": "alientek-openedv/atk_libsigrokdecode",
+      "branch": "master",
+      "pin": "783fec96047f5859c2122ac79123a6929a35f75f"
+    },
+    {
+      "key": "CPP",
+      "repo": "gjjisadog/ATK-Logic-Mcp",
+      "branch": "master",
+      "pin": "5fc47744c18c99f9ad0f554a965eb8cd1160c836"
+    },
+    {
+      "key": "HUGEL",
+      "repo": "hugelzhang/atk-logic-mcp",
+      "branch": "main",
+      "pin": "77320addfb34d3973d09a7af663de76023034587"
+    },
+    {
+      "key": "LHX",
+      "repo": "LHX369963/dl16-cli",
+      "branch": "master",
+      "pin": "8d7c209c1e3b13923620bb34cec915291a749612"
+    }
+  ],
+  "pull_requests": [
+    {
+      "repo": "alientek-openedv/atk-logic",
+      "number": 4,
+      "topic": "LCD8080 10/11-channel decoder"
+    },
+    {
+      "repo": "alientek-openedv/atk-logic",
+      "number": 5,
+      "topic": "Linux GUI Qt5 build and compatibility"
+    }
+  ]
+}
