@@ -212,3 +212,31 @@ channel comparison equivalence is claimed without crop alignment. See
 ## TASK-049 asynchronous BUFFER provenance
 
 Owner dispatcher and host API independently authored against pinned CPP public interfaces and existing tracked patches. Native CaptureEngine/SampleStore adaptations persist as the final tracked bootstrap patch; no LHX implementation copied or translated. CPP Stream mode flags are not evidence of validated incremental Stream or mode-tail handling. Only async_buffer_v1 is advertised, with OFFLINE_SYNTHETIC dispatcher/native artifact evidence. Parent-provided physical cancellation requests exposed legacy OK cancellation classification; the independent shared classification fix and actual native serialization regression are SYNTHETIC_OFFLINE, not post-fix HIL. Original physical records remain unchanged; corrected-code physical cancel and Stream remain separate gates. See tasks/DL16-TASK-049-async-buffer-foundation.md.
+
+
+## 2026-10-17 upstream refresh — DL16-TASK-067
+
+Five pinned upstream GitHub repositories were rechecked using default-branch HEAD and
+GitHub compare(pin...branch). All five default branches are byte-identical by
+commit SHA to the pins in the reference table above (ahead_by=0, behind_by=0).
+**No upstream repin or native USB protocol changes are justified by this check.**
+
+Two contributions are OPEN but UNMERGED in the official GUI repository:
+- [PR #5 Linux Qt5 build](https://github.com/alientek-openedv/atk-logic/pull/5),
+  reporting an FPGA minimum-version check and an APP_VERSION_NUM=1199 bypass;
+  do not infer protocol compatibility or adopt this workaround.
+- [PR #4 LCD8080 decoder](https://github.com/alientek-openedv/atk-logic/pull/4):
+  10 mandatory / 11 optional input signals; do not widen the default safe capture
+  channel cap without independent operator-authorized HIL.
+
+Detailed evidence and next engineering gates:
+[DL16-TASK-067 upstream refresh](research/DL16-TASK-067-upstream-refresh-2026-10-17.md).
+
+Reproducible read-only network check (no hardware/no file mutations):
+- Fixed manifest: [dl16-reference-watch.json](research/dl16-reference-watch.json).
+- Command: python scripts/check_dl16_references.py --markdown
+- Offline regression: python -m pytest -q tests/test_task067_reference_watch.py
+
+An API error is UNKNOWN, not UNCHANGED. PR reports and author hardware claims
+remain REPORTED_HIL. This review does not close the TASK-066 physical PWM-off
+and second-process ownership gates.
