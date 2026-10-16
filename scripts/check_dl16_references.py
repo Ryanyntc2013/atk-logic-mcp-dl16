@@ -26,7 +26,8 @@ class RemoteCheckError(RuntimeError):
 
 
 def _url(repo: str, suffix: str) -> str:
-    if not REPO_RE.fullmatch(repo) or "/" in suffix.lstrip("/") and ".." in suffix:
+    if (not REPO_RE.fullmatch(repo) or
+            any(part in (".", "..") for part in suffix.split("/"))):
         raise ValueError("Invalid fixed reference URL")
     return f"https://api.github.com/repos/{repo}/{suffix.lstrip('/')}"
 
