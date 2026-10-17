@@ -79,4 +79,6 @@ VENDOR_SRD 仍未出现新默认分支提交。Linux PR #5 提及其隐符号链
 
 依照显式 pin 查询 5 个默认分支 commit SHA / date，用 GitHub compare API 判定 ahead_by；分别查询 releases、open PR/issue，防止仅凭仓库 updated_at 当作提交。遇到网络/API 错误标 UNKNOWN，不报告无更新。发现新 commit 后先 diff/版权审查，再构造离线向量，最后才单独申请真机实验和 repin 决策。
 
+只读检查脚本 `scripts/check_dl16_references.py` 的退出码：`0` 五个 pin 均为 UNCHANGED 且监视中的 PR 仍为 OPEN；`2` 出现 drift（pin/默认分支变化，或监视中的 PR 不再是 OPEN；已合并时状态记为 MERGED，仅关闭未合并记为 CLOSED）；`3` 网络或 API 失败导致 UNKNOWN（优先于 drift，UNKNOWN 不是无更新）；`4` manifest 缺失或无效，此时没有网络结论。
+
 证据分层：GitHub commit/PR/release 是 REMOTE_SOURCE；其他作者的设备报告是 REPORTED_HIL；此次未连接真实 DL16，因此所有硬件问题仍为 HIL_NOT_RUN。

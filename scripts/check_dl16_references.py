@@ -2,6 +2,14 @@
 
 No checkout, USB, device, file mutation, auto-repin, or network access in tests.
 The only live network path is public GitHub REST when the operator runs the script.
+
+Exit codes:
+  0  every pinned repository is UNCHANGED and every watched PR is still OPEN
+  2  drift: a pin or default branch moved, or a watched PR is no longer OPEN
+     (CLOSED, or MERGED when GitHub reports the pull request as merged)
+  3  inconclusive: a repository or PR check is UNKNOWN after a network/API
+     failure. UNKNOWN is not UNCHANGED. This code wins over drift.
+  4  the manifest is missing or invalid, so no network result was produced
 """
 from __future__ import annotations
 
@@ -17,7 +25,10 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 MANIFEST = Path(__file__).resolve().parents[1] / "docs/research/dl16-reference-watch.json"
-REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+# Owner and repo are one segment each. "." and ".." are path traversal, not names.
+# Embedded dots (foo.bar) stay legal; compare "..." is a suffix, not a repo segment.
+_SEGMENT = r"(?!\.(?:/|$))(?!\.\.(?:/|$))[A-Za-z0-9_.-]+"
+REPO_RE = re.compile(rf"^{_SEGMENT}/{_SEGMENT}$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -29,7 +40,15 @@ def _url(repo: str, suffix: str) -> str:
     if (not REPO_RE.fullmatch(repo) or
             any(part in (".", "..") for part in suffix.split("/"))):
         raise ValueError("Invalid fixed reference URL")
-    return f"https://api.github.com/repos/{repo}/{suffix.lstrip('/')}"
+    tail = suffix.lstrip("/")
+    base = f"https://api.github.com/repos/{repo}"
+    # GitHub returns 404 for /repos/{owner}/{repo}/ ; the root resource has no slash.
+    return f"{base}/{tail}" if tail else base
+
+
+def _resolve_getter(getter: Callable[[str], dict] | None) -> Callable[[str], dict]:
+    # Look up github_json at call time so tests can replace it after import.
+    return github_json if getter is None else getter
 
 
 def github_json(url: str, *, timeout: float = 12) -> dict[str, Any]:
@@ -65,7 +84,8 @@ def load_manifest(path: Path = MANIFEST) -> dict[str, Any]:
     return manifest
 
 
-def check_reference(item: dict, getter: Callable[[str], dict] = github_json) -> dict:
+def check_reference(item: dict, getter: Callable[[str], dict] | None = None) -> dict:
+    getter = _resolve_getter(getter)
     repo, branch, pin = item["repo"], item["branch"], item["pin"]
     result = {"project": item["key"], "repository": repo, "pin": pin, "branch": branch}
     try:
@@ -90,15 +110,18 @@ def check_reference(item: dict, getter: Callable[[str], dict] = github_json) -> 
         return {**result, "status": "UNKNOWN", "error": str(exc)}
 
 
-def check_pr(item: dict, getter: Callable[[str], dict] = github_json) -> dict:
+def check_pr(item: dict, getter: Callable[[str], dict] | None = None) -> dict:
+    getter = _resolve_getter(getter)
     result = {"repository": item["repo"], "number": item["number"],
               "topic": item["topic"]}
     try:
         pr = getter(_url(item["repo"], f"pulls/{item['number']}"))
         if not isinstance(pr.get("state"), str):
             raise RemoteCheckError("PR state unavailable")
-        return {**result, "status": pr["state"].upper(),
-                "merged": bool(pr.get("merged", False)),
+        merged = bool(pr.get("merged")) or bool(pr.get("merged_at"))
+        # A merged PR's GitHub state is "closed"; report MERGED when it landed.
+        status = "MERGED" if merged else pr["state"].upper()
+        return {**result, "status": status, "merged": merged,
                 "title": pr.get("title"),
                 "updated_at": pr.get("updated_at"),
                 "head": pr.get("head", {}).get("sha")}
@@ -106,14 +129,16 @@ def check_pr(item: dict, getter: Callable[[str], dict] = github_json) -> dict:
         return {**result, "status": "UNKNOWN", "error": str(exc)}
 
 
-def audit(manifest: dict, getter: Callable[[str], dict] = github_json) -> dict:
+def audit(manifest: dict, getter: Callable[[str], dict] | None = None) -> dict:
+    getter = _resolve_getter(getter)
     repos = [check_reference(item, getter) for item in manifest["repositories"]]
     prs = [check_pr(item, getter) for item in manifest.get("pull_requests", [])]
     return {"schema": "dl16-reference-audit/v1",
             "observed_utc": datetime.now(timezone.utc).isoformat(),
             "repositories": repos, "pull_requests": prs,
             "unchanged": sum(x["status"] == "UNCHANGED" for x in repos),
-            "drift": sum(x["status"] == "DRIFT" for x in repos),
+            "drift": (sum(x["status"] == "DRIFT" for x in repos)
+                      + sum(x["status"] not in ("OPEN", "UNKNOWN") for x in prs)),
             "unknown": sum(x["status"] == "UNKNOWN" for x in repos)
                      + sum(x["status"] == "UNKNOWN" for x in prs),
             "repin_performed": False, "physical_hil_performed": False}
@@ -143,9 +168,10 @@ def main(argv: list[str] | None = None) -> int:
         report = audit(load_manifest(args.manifest))
     except (OSError, ValueError, KeyError, TypeError) as exc:
         print(f"REFERENCE_MANIFEST_INVALID: {exc}", file=sys.stderr)
-        return 3
+        return 4
     print(as_markdown(report) if args.markdown else json.dumps(report, ensure_ascii=False, indent=2))
-    # DRIFT asks for review; UNKNOWN indicates the network check was inconclusive.
+    # 2 = known drift, including a watched PR that is no longer OPEN.
+    # 3 = UNKNOWN network/API and wins over drift. 4 = invalid manifest.
     return 3 if report["unknown"] else (2 if report["drift"] else 0)
 
 

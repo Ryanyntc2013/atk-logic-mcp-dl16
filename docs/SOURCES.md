@@ -236,6 +236,11 @@ Reproducible read-only network check (no hardware/no file mutations):
 - Fixed manifest: [dl16-reference-watch.json](research/dl16-reference-watch.json).
 - Command: python scripts/check_dl16_references.py --markdown
 - Offline regression: python -m pytest -q tests/test_task067_reference_watch.py
+- Exit codes: `0` every pin is UNCHANGED and every watched PR is still OPEN;
+  `2` drift (pin or default branch moved, or a watched PR is no longer OPEN —
+  reported `MERGED` when GitHub says it merged, otherwise `CLOSED`);
+  `3` a check is UNKNOWN after a network/API failure (this wins over drift);
+  `4` the manifest is missing or invalid, so no network result was produced.
 
 An API error is UNKNOWN, not UNCHANGED. PR reports and author hardware claims
 remain REPORTED_HIL. This review does not close the TASK-066 physical PWM-off
