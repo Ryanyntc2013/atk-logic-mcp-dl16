@@ -53,15 +53,140 @@ _RETRYABLE_OPEN_FRAGMENT = "failed to parse fpga device info"
 _SESSION_LOCK = threading.Lock()
 _SESSION: NativeSession | None = None
 _SESSION_PATH: Path | None = None
+# Sessions removed from _SESSION while close() or an async op may still hold USB.
+_RETIRING: list[NativeSession] = []
+# Set for the whole self-test so the busy check and the first PWM are one claim.
+_SELF_TEST_CLAIMED = False
+_self_test_claim = threading.local()
+_DEFAULT_TRIGGER_TIMEOUT_SEC = 30
+_HOST_TIMEOUT_DEFAULT_S = 45.0
+_HOST_TIMEOUT_EXPLICIT_MAX_S = 3600.0
+# A documented 3600 s trigger wait plus capture duration does not fit in 3600 s.
+_HOST_TIMEOUT_DERIVED_MAX_S = 7200.0
+_CLEANUP_MARGIN_S = 5.0
 
 
 def _session_enabled() -> bool:
     return os.environ.get("DL16_BACKEND_MODE", "oneshot").strip().lower() == "session"
 
 
+def session_mode_enabled() -> bool:
+    return _session_enabled()
+
+
+def _owner_still_busy(session: Any) -> bool:
+    is_closed = getattr(session, "is_closed", True)
+    if not isinstance(is_closed, bool):
+        is_closed = True
+    has_operation = getattr(session, "has_active_operation", None)
+    active = bool(has_operation()) if callable(has_operation) else False
+    return (not is_closed) or active
+
+
+def has_owned_session() -> bool:
+    """True when this process still holds a native session that has not been closed."""
+    with _SESSION_LOCK:
+        session = _SESSION
+    return session is not None and not bool(getattr(session, "is_closed", False))
+
+
+def _tracked_sessions() -> list[Any]:
+    return [session for session in (_SESSION, *_RETIRING) if session is not None]
+
+
+def device_busy() -> bool:
+    """True when a live session, a retiring owner, an in-flight buffer/stream, or a self-test claim holds the device.
+
+    An async operation can outlive the ``_SESSION`` pointer: close removes that
+    pointer before cancel finishes. The operation id is cleared once that child
+    is confirmed exited.
+    """
+    with _SESSION_LOCK:
+        claimed = _SELF_TEST_CLAIMED
+        sessions = _tracked_sessions()
+    return claimed or any(_owner_still_busy(session) for session in sessions)
+
+
+def claim_for_self_test() -> bool:
+    """Atomically reserve the device for self-test when nothing else owns it.
+
+    The claiming thread may then open the session. Other threads see the claim
+    as busy and cannot start a second owner.
+    """
+    global _SELF_TEST_CLAIMED
+    with _SESSION_LOCK:
+        if _SELF_TEST_CLAIMED or any(_owner_still_busy(session) for session in _tracked_sessions()):
+            return False
+        _SELF_TEST_CLAIMED = True
+    _self_test_claim.held = True
+    return True
+
+
+def release_self_test_claim() -> None:
+    """Drop this thread's self-test reservation.
+
+    A caller that does not hold the claim leaves it in place, so another
+    thread cannot clear a self-test that is still running.
+    """
+    global _SELF_TEST_CLAIMED
+    with _SESSION_LOCK:
+        if not getattr(_self_test_claim, "held", False):
+            return
+        _SELF_TEST_CLAIMED = False
+        _self_test_claim.held = False
+
+
+def _reset_self_test_claim_for_tests() -> None:
+    """Clear the self-test claim from whichever thread took it.
+
+    Test teardown only. Production callers use ``release_self_test_claim``.
+    """
+    global _SELF_TEST_CLAIMED
+    with _SESSION_LOCK:
+        _SELF_TEST_CLAIMED = False
+        _self_test_claim.held = False
+
+
+def _outsider_during_self_test() -> bool:
+    """True when another thread's self-test claim is active. Caller holds the lock."""
+    return _SELF_TEST_CLAIMED and not getattr(_self_test_claim, "held", False)
+
+
+def _self_test_busy_result() -> dict[str, Any]:
+    return {"success": False, "error_code": "DEVICE_BUSY", "message": "self-test holds the device"}
+
+
+def _track_retiring(session: NativeSession) -> None:
+    global _SESSION, _SESSION_PATH
+    with _SESSION_LOCK:
+        if _SESSION is session:
+            _SESSION = None
+            _SESSION_PATH = None
+        if session not in _RETIRING:
+            _RETIRING.append(session)
+
+
+def _finish_retire(session: NativeSession) -> dict[str, Any]:
+    _track_retiring(session)
+    try:
+        session.close()
+        result: dict[str, Any] = {"success": True, "closed": True}
+    except SessionFailure as exc:
+        result = {"success": False, "closed": True, "error_code": exc.code, "message": str(exc)}
+    with _SESSION_LOCK:
+        if not _owner_still_busy(session):
+            try:
+                _RETIRING.remove(session)
+            except ValueError:
+                pass
+    return result
+
+
 def _get_session(cli: Path) -> NativeSession:
     global _SESSION, _SESSION_PATH
     with _SESSION_LOCK:
+        if _outsider_during_self_test():
+            raise SessionFailure("DEVICE_BUSY", "self-test holds the device")
         if (_SESSION is not None and _SESSION_PATH == cli
                 and not _SESSION.failed):
             return _SESSION
@@ -141,7 +266,36 @@ def _status_once(cli: Path) -> dict[str, Any]:
             "attempts": attempt, "retry_log": retry_log}
 
 
-def capture(request: CaptureRequest, timeout_s: float = 45.0,
+def _resolve_host_timeout(request: CaptureRequest, timeout_s: float | None,
+                          trigger_timeout_sec: int | None) -> float:
+    """Use an explicit host deadline, or expand the default so a trigger wait fits.
+
+    The historical default of 45 s rejects documented trigger waits above about
+    40 s. Omitted timeouts grow to cover the device wait, capture duration, and
+    cleanup margin. Explicit timeouts stay on the 1..3600 s contract.
+    """
+    if timeout_s is not None:
+        if (isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float))
+                or not 1.0 <= float(timeout_s) <= _HOST_TIMEOUT_EXPLICIT_MAX_S):
+            raise ValueError("timeout_s must be from 1 to 3600 seconds")
+        resolved = float(timeout_s)
+        if request.trigger != "immediate":
+            # Omitted trigger_timeout_sec is still sent as the 30 s device default.
+            wait = _DEFAULT_TRIGGER_TIMEOUT_SEC if trigger_timeout_sec is None else trigger_timeout_sec
+            if resolved <= wait + request.duration_ms / 1000 + _CLEANUP_MARGIN_S:
+                raise ValueError("Host timeout must exceed trigger wait + capture duration + 5s cleanup margin")
+        return resolved
+    resolved = _HOST_TIMEOUT_DEFAULT_S
+    if request.trigger != "immediate":
+        wait = _DEFAULT_TRIGGER_TIMEOUT_SEC if trigger_timeout_sec is None else trigger_timeout_sec
+        needed = float(wait) + request.duration_ms / 1000 + _CLEANUP_MARGIN_S + 1.0
+        resolved = max(resolved, needed)
+    if resolved > _HOST_TIMEOUT_DERIVED_MAX_S:
+        raise ValueError("Derived host timeout exceeds 7200 seconds")
+    return resolved
+
+
+def capture(request: CaptureRequest, timeout_s: float | None = None,
             trigger_position_percent: float | None = None,
             trigger_timeout_sec: int | None = None,
             raw_rx_path: str | Path | None = None,
@@ -163,12 +317,11 @@ def capture(request: CaptureRequest, timeout_s: float = 45.0,
             return {"success": False, "error_code": "RLE_NOT_VALIDATED",
                     "evidence_source": "NONE", "data_integrity": "UNKNOWN",
                     "message": "Hardware RLE framing and bounded expansion are not validated; request not sent"}
-        if not 1.0 <= timeout_s <= 3600:
-            raise ValueError("timeout_s must be from 1 to 3600 seconds")
         if trigger_position_percent is not None and not 0.0 <= trigger_position_percent <= 100.0:
             raise ValueError("trigger_position_percent must be within [0, 100]")
         if trigger_timeout_sec is not None and not 1 <= trigger_timeout_sec <= 3600:
             raise ValueError("trigger_timeout_sec must be from 1 to 3600")
+        timeout_s = _resolve_host_timeout(request, timeout_s, trigger_timeout_sec)
     except (ValueError, TypeError) as exc:
         return {"success": False, "error_code": "INVALID_CAPTURE_CONFIG", "message": str(exc),
                 "data_integrity": "UNKNOWN", "evidence_source": "NONE"}
@@ -199,7 +352,7 @@ def capture(request: CaptureRequest, timeout_s: float = 45.0,
                 "threshold_voltage": request.threshold_voltage,
                 "trigger": request.trigger,
                 "trigger_position_percent": (trigger_position_percent if trigger_position_percent is not None else 10.0),
-                "trigger_timeout_sec": (trigger_timeout_sec if trigger_timeout_sec is not None else 30),
+                "trigger_timeout_sec": (trigger_timeout_sec if trigger_timeout_sec is not None else _DEFAULT_TRIGGER_TIMEOUT_SEC),
                 "output_dir": str(captures_dir()),
             }, timeout_s=timeout_s)
             doc = response.get("result")
@@ -214,16 +367,12 @@ def capture(request: CaptureRequest, timeout_s: float = 45.0,
             if not doc.get("success"):
                 # An incomplete or timed-out acquisition cannot safely reuse device state.
                 session = _get_session(cli)
-                try:
-                    session.close()
+                closed = _finish_retire(session)
+                if closed.get("success"):
                     doc["session_cleanup"] = "closed"
-                except SessionFailure as cleanup:
-                    doc["session_cleanup"] = {"error_code": cleanup.code, "message": str(cleanup)}
-                with _SESSION_LOCK:
-                    global _SESSION, _SESSION_PATH
-                    if _SESSION is session:
-                        _SESSION = None
-                        _SESSION_PATH = None
+                else:
+                    doc["session_cleanup"] = {"error_code": closed.get("error_code"),
+                                              "message": closed.get("message")}
                 doc["session_invalidated"] = True
             doc["backend"] = "native-session"
             doc["attempts"] = 1
@@ -328,15 +477,19 @@ def pwm(output: int, action: str = "configure", frequency_hz: int = 1000,
 def close_session() -> dict[str, Any]:
     global _SESSION, _SESSION_PATH
     with _SESSION_LOCK:
+        if _outsider_during_self_test():
+            return {**_self_test_busy_result(), "closed": False}
         session, _SESSION = _SESSION, None
         _SESSION_PATH = None
+        still_busy = any(item is not session and _owner_still_busy(item) for item in _RETIRING)
     if session is None:
+        # No owner was installed. That is clean unless a previous close left an
+        # operation or process still holding the device.
+        if still_busy:
+            return {"success": False, "closed": False, "error_code": "DEVICE_STILL_BUSY",
+                    "message": "A previous owner is still closing or has an active buffer/stream operation"}
         return {"success": True, "closed": False}
-    try:
-        session.close()
-        return {"success": True, "closed": True}
-    except SessionFailure as exc:
-        return {"success": False, "closed": True, "error_code": exc.code, "message": str(exc)}
+    return _finish_retire(session)
 
 
 def stream_start(*, experimental_opt_in: bool = False, safety_confirmation: str = "",
@@ -375,6 +528,8 @@ def stream_start(*, experimental_opt_in: bool = False, safety_confirmation: str 
 
 def stream_control(operation_id: str, *, cancel: bool = False) -> dict[str, Any]:
     with _SESSION_LOCK:
+        if cancel and _outsider_during_self_test():
+            return _self_test_busy_result()
         session = _SESSION
     if session is None or session.failed or not _session_enabled():
         return {"success": False, "error_code": "NO_ACTIVE_SESSION", "message": "Original owner unavailable"}
@@ -409,6 +564,8 @@ def buffer_start(request: CaptureRequest, trigger_timeout_sec: int = 30) -> dict
 def buffer_control(operation_id: str, *, cancel: bool = False) -> dict[str, Any]:
     # Never create/restart a worker to poll an operation belonging to a lost owner.
     with _SESSION_LOCK:
+        if cancel and _outsider_during_self_test():
+            return _self_test_busy_result()
         session = _SESSION
     if session is None or session.failed or not _session_enabled():
         return {"success": False, "error_code": "NO_ACTIVE_SESSION", "message": "Original owner unavailable"}

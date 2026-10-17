@@ -55,6 +55,11 @@ for line in sys.stdin:
             print(json.dumps({"request_id":req["request_id"],"ok":True,"action":"stop","output":output,"payload":"10" if output==0 else "20"}), flush=True)
         else:
             print(json.dumps({"request_id":req["request_id"],"ok":False,"error_code":"INVALID_PWM","message":"unknown op"}), flush=True)
+    elif command == "capture_cancel":
+        print(json.dumps({"request_id":req["request_id"],"ok":True}), flush=True)
+    elif command == "capture_poll":
+        state = "running" if mode == "cancel_stuck" else "finished"
+        print(json.dumps({"request_id":req["request_id"],"ok":True,"state":state}), flush=True)
     elif command == "close":
         if mode == "cleanup_fail":
             print(json.dumps({"request_id":req["request_id"],"ok":False,"error_code":"CLEANUP_FAILED","message":"device not open to stop session PWM outputs"}), flush=True)
@@ -217,3 +222,49 @@ def test_session_close_propagates_cleanup_error(tmp_path):
         # Subsequent close is idempotent
         session.close()
     assert session.pid is None
+
+
+def test_close_of_dead_child_clears_stuck_operation_id():
+    session = NativeSession(Path("worker"))
+    session._operation_id = "op-stuck"
+    session._failed = True
+    session.close()
+    assert session.has_active_operation() is False
+    assert session.is_closed is True
+
+
+def test_cancel_timeout_then_child_exit_clears_device_busy(tmp_path, monkeypatch):
+    import dl16_mcp.backend as backend
+    import dl16_mcp.session as session_module
+
+    monkeypatch.setattr(session_module, "CANCEL_CLEANUP_SECONDS", 0)
+    factory, _calls = _factory("cancel_stuck", tmp_path / "commands.log")
+    session = NativeSession(Path("worker"), popen_factory=factory)
+    previous = (backend._SESSION, backend._SESSION_PATH, list(backend._RETIRING), backend._SELF_TEST_CLAIMED)
+    backend._SESSION = None
+    backend._SESSION_PATH = None
+    backend._RETIRING.clear()
+    backend._SELF_TEST_CLAIMED = False
+    try:
+        session.request({"command": "status"}, timeout_s=2)
+        session._operation_id = "op-stuck"
+        session._operation_kind = "capture"
+        backend._SESSION = session
+        backend._SESSION_PATH = Path("worker")
+        result = backend.close_session()
+        assert result["success"] is False
+        assert result["error_code"] == "SESSION_TIMEOUT"
+        assert result["closed"] is True
+        assert session.has_active_operation() is False
+        assert session.is_closed is True
+        assert session.pid is None
+        assert backend.device_busy() is False
+        assert session not in backend._RETIRING
+    finally:
+        try:
+            session.close()
+        except SessionFailure:
+            pass
+        backend._SESSION, backend._SESSION_PATH = previous[0], previous[1]
+        backend._RETIRING[:] = previous[2]
+        backend._SELF_TEST_CLAIMED = previous[3]

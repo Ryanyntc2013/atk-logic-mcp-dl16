@@ -1,8 +1,13 @@
 import json
+import threading
+from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from dl16_mcp import backend
 from dl16_mcp.config import CaptureRequest
+from dl16_mcp.session import SessionFailure
 
 
 def test_invalid_channel_fails_closed():
@@ -297,6 +302,13 @@ def test_native_capture_failure_closes_session_without_replay(monkeypatch, tmp_p
         def request(self, request, timeout_s):
             self.requests += 1
             return {"result": {"success": False, "error_code": "CAPTURE_TIMEOUT"}}
+        @property
+        def is_closed(self):
+            return self.closed
+
+        def has_active_operation(self):
+            return False
+
         def close(self):
             self.closed = True
 
@@ -306,6 +318,181 @@ def test_native_capture_failure_closes_session_without_replay(monkeypatch, tmp_p
     assert session.requests == 1 and session.closed
     assert result["error_code"] == "CAPTURE_TIMEOUT"
     assert result["session_invalidated"] is True
+
+
+def test_close_session_without_owner_is_clean_and_retiring_operation_is_busy():
+    previous = (backend._SESSION, backend._SESSION_PATH, list(backend._RETIRING))
+    backend._SESSION = None
+    backend._SESSION_PATH = None
+    backend._RETIRING.clear()
+    try:
+        assert backend.close_session() == {"success": True, "closed": False}
+        assert backend.device_busy() is False
+
+        class Owner:
+            is_closed = True
+
+            def has_active_operation(self):
+                return True
+
+        owner = Owner()
+        backend._SESSION = owner
+        assert backend.has_owned_session() is False
+        assert backend.device_busy() is True
+        backend._SESSION = None
+        backend._RETIRING.append(owner)
+        refused = backend.close_session()
+        assert refused["success"] is False
+        assert refused["error_code"] == "DEVICE_STILL_BUSY"
+        assert refused["closed"] is False
+    finally:
+        backend._SESSION, backend._SESSION_PATH, backend._RETIRING[:] = previous
+
+
+def test_explicit_timeout_covers_default_trigger_wait(monkeypatch):
+    monkeypatch.setattr(backend, "find_native_cli", lambda: None)
+    short = backend.capture(
+        CaptureRequest(channels=(0,), duration_ms=20, trigger="ch0:rising"),
+        timeout_s=20,
+    )
+    assert short["error_code"] == "INVALID_CAPTURE_CONFIG"
+    assert "trigger wait" in short["message"]
+    # Device default wait is 30 s. 40 > 30 + 0.02 + 5, so validation must pass
+    # and stop at the missing CLI rather than launch hardware.
+    accepted = backend.capture(
+        CaptureRequest(channels=(0,), duration_ms=20, trigger="ch0:rising"),
+        timeout_s=40,
+    )
+    assert accepted["error_code"] == "CLI_MISSING"
+
+
+def test_self_test_claim_excludes_other_owners():
+    previous = (backend._SESSION, backend._SESSION_PATH, list(backend._RETIRING), backend._SELF_TEST_CLAIMED)
+    backend._SESSION = None
+    backend._SESSION_PATH = None
+    backend._RETIRING.clear()
+    backend._reset_self_test_claim_for_tests()
+    try:
+        barrier = threading.Barrier(2)
+        results = []
+
+        def contender():
+            barrier.wait(timeout=2)
+            results.append(backend.claim_for_self_test())
+
+        threads = [threading.Thread(target=contender) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=3)
+        assert sorted(results) == [False, True]
+        assert backend.device_busy() is True
+        assert backend.claim_for_self_test() is False
+        with pytest.raises(SessionFailure) as caught:
+            backend._get_session(Path("unused-cli"))
+        assert caught.value.code == "DEVICE_BUSY"
+    finally:
+        backend._reset_self_test_claim_for_tests()
+        backend._SESSION, backend._SESSION_PATH = previous[0], previous[1]
+        backend._RETIRING[:] = previous[2]
+        backend._SELF_TEST_CLAIMED = previous[3]
+
+
+def test_close_session_blocks_thread_that_does_not_hold_self_test():
+    previous = (backend._SESSION, backend._SESSION_PATH, list(backend._RETIRING), backend._SELF_TEST_CLAIMED)
+    backend._SESSION = None
+    backend._SESSION_PATH = None
+    backend._RETIRING.clear()
+    backend._reset_self_test_claim_for_tests()
+
+    class Owner:
+        def __init__(self):
+            self.is_closed = False
+            self.closed_calls = 0
+
+        def has_active_operation(self):
+            return False
+
+        def close(self):
+            self.closed_calls += 1
+            self.is_closed = True
+
+    owner = Owner()
+    try:
+        assert backend.claim_for_self_test() is True
+        backend._SESSION = owner
+        refused = []
+
+        def other():
+            refused.append(backend.close_session())
+            backend.release_self_test_claim()
+
+        thread = threading.Thread(target=other)
+        thread.start()
+        thread.join(timeout=3)
+        assert refused == [{"success": False, "closed": False, "error_code": "DEVICE_BUSY",
+                            "message": "self-test holds the device"}]
+        assert owner.closed_calls == 0
+        assert backend._SESSION is owner
+        assert backend.device_busy() is True
+        closed = backend.close_session()
+        assert closed["success"] is True
+        assert closed["closed"] is True
+        assert owner.closed_calls == 1
+        backend.release_self_test_claim()
+        assert backend.device_busy() is False
+    finally:
+        backend._reset_self_test_claim_for_tests()
+        backend._SESSION, backend._SESSION_PATH = previous[0], previous[1]
+        backend._RETIRING[:] = previous[2]
+        backend._SELF_TEST_CLAIMED = previous[3]
+
+
+def test_self_test_blocks_other_thread_cancel_but_not_poll(monkeypatch):
+    monkeypatch.setenv("DL16_BACKEND_MODE", "session")
+    previous = (backend._SESSION, backend._SESSION_PATH, list(backend._RETIRING), backend._SELF_TEST_CLAIMED)
+    backend._SESSION = None
+    backend._SESSION_PATH = None
+    backend._RETIRING.clear()
+    backend._reset_self_test_claim_for_tests()
+
+    class Owner:
+        def __init__(self):
+            self.failed = False
+            self.calls = []
+
+        def request(self, request, timeout_s):
+            self.calls.append(request["command"])
+            return {"ok": True, "state": "running"}
+
+    owner = Owner()
+    try:
+        assert backend.claim_for_self_test() is True
+        backend._SESSION = owner
+        refused = {}
+
+        def other():
+            refused["stream"] = backend.stream_control("op-stream", cancel=True)
+            refused["buffer"] = backend.buffer_control("op-buffer", cancel=True)
+            refused["stream_poll"] = backend.stream_control("op-stream", cancel=False)
+            refused["buffer_poll"] = backend.buffer_control("op-buffer", cancel=False)
+
+        thread = threading.Thread(target=other)
+        thread.start()
+        thread.join(timeout=3)
+        assert refused["stream"]["error_code"] == "DEVICE_BUSY"
+        assert refused["buffer"]["error_code"] == "DEVICE_BUSY"
+        assert refused["stream_poll"]["ok"] is True
+        assert refused["buffer_poll"]["ok"] is True
+        assert owner.calls == ["stream_poll", "capture_poll"]
+        assert backend.stream_control("op-stream", cancel=True)["ok"] is True
+        assert backend.buffer_control("op-buffer", cancel=True)["ok"] is True
+        assert owner.calls[-2:] == ["stream_cancel", "capture_cancel"]
+    finally:
+        backend._reset_self_test_claim_for_tests()
+        backend._SESSION, backend._SESSION_PATH = previous[0], previous[1]
+        backend._RETIRING[:] = previous[2]
+        backend._SELF_TEST_CLAIMED = previous[3]
 
 
 def test_unvalidated_rle_is_not_silently_ignored(monkeypatch):

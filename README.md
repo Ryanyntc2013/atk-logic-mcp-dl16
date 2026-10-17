@@ -72,7 +72,7 @@ command = "C:\\path\\to\\atk-logic-mcp-dl16\\.venv\\Scripts\\python.exe"
 args = ["-m", "dl16_mcp.server"]
 ```
 
-For Cursor, add to `.cursor/mcp.json` or the user's MCP settings, with a **full absolute** path:
+For Cursor, copy [`.cursor/mcp.json.example`](.cursor/mcp.json.example) to `.cursor/mcp.json` (gitignored; do not commit machine paths) or edit the user's MCP settings. Use a **full absolute** path:
 
 ```json
 {
@@ -119,7 +119,7 @@ See [TASK-020 session journal](docs/tasks/DL16-TASK-020-session-evidence-journal
 | Tool | Status | Description |
 |---|---|---|
 | `logic_status` | Native adapter (cached in session mode) | Device identification, firmware, USB state |
-| `logic_self_test` | End-to-end automated HIL tool | Automated health check across USB link, dual PWM, 20MHz Buffer and 1MHz Stream captures |
+| `logic_self_test` | Session-mode diagnostic | Real PWM0/PWM1 loopback on CH8/CH14. **Breaking:** the boolean `confirm_safe_wiring` argument is gone; pass `safety_confirmation="CONFIRMED_SAFE_WIRING_GUI_CLOSED"`. A pass is `DIAGNOSTIC_PASS_UNCALIBRATED`, not a calibration |
 | `logic_capture` | Native adapter; gating/position HIL-verified | Bounded buffer capture; edge/level and multi-channel AND triggers gate (10-byte payload); `trigger_position_percent` sets pre-trigger |
 | `logic_buffer_start` | Native async adapter | Start asynchronous bounded Buffer capture with cooperative cancellation |
 | `logic_buffer_poll` | Native async adapter | Poll bounded asynchronous Buffer status and completion |
@@ -142,6 +142,10 @@ See [TASK-020 session journal](docs/tasks/DL16-TASK-020-session-evidence-journal
 MCP SDK is deliberately pinned to the v1 maintenance API (`mcp>=1.28,<2`) so the tested `mcp.server.fastmcp` entry point does not silently switch major versions.
 
 Full parameter reference, native helper tools and evidence tiers: [docs/MCP-TOOLS.md](docs/MCP-TOOLS.md).
+
+### Breaking change: `logic_self_test`
+
+`logic_self_test` no longer accepts `confirm_safe_wiring` (bool). Call it with the exact string `safety_confirmation="CONFIRMED_SAFE_WIRING_GUI_CLOSED"` after checking that PWM0 is wired to CH8, PWM1 is wired to CH14, the voltage is safe, and the ATK-Logic GUI is closed. `logic_pwm` is unchanged and still requires `confirm_safe_wiring=True`. See [CHANGELOG.md](CHANGELOG.md).
 
 Controlled PWM and explicit session close are exposed through MCP/CLI (TASK-034). Safe wiring confirmation and session backend are required; physical output must be measured separately. Real MCP stdio setup/capture/measurement/close passed on the recorded device.
 

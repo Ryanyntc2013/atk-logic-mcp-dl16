@@ -12,7 +12,9 @@ def wf(ch, bits, rate=1_000_000):
 
 def uart_bits(byte, spb, data_bits=8, parity=None, stop=1, invert=False):
     high, low = (0, 1) if invert else (1, 0)
-    b = [high] * spb + [low] * spb
+    # Two bits of mark before the start. One bit is not enough to lock, so a
+    # capture that begins on a single data bit is not a byte.
+    b = [high] * (spb * 2) + [low] * spb
     for k in range(data_bits):
         bit = (byte >> k) & 1
         b += [(high if bit else low)] * spb
@@ -40,6 +42,112 @@ def test_uart_even_parity_and_mismatch():
     assert decode_uart(ok, baud_rate=100_000, parity="even")[0]["parity_ok"] is True
     # Decoding an even-parity frame as odd must flag a parity error.
     assert decode_uart(ok, baud_rate=100_000, parity="odd")[0]["parity_ok"] is False
+
+
+def test_uart_noise_glitch_does_not_swallow_following_byte():
+    # A one-bit false start whose stop sample lands inside a later real frame
+    # must not be stored or consume the result limit. Search resumes one bit later.
+    spb = 10
+    bits = [1] * 30
+    bits += [0] * spb                 # false start at sample 30
+    bits += [1] * 20                  # idle, real start falls at sample 60
+    bits += [0] * spb                 # real start
+    bits += [0] * (8 * spb)           # 0x00, LSB first
+    bits += [1] * spb                 # stop
+    bits += [1] * spb
+    frames = decode_uart(wf(0, bits), baud_rate=100_000)
+    assert [frame["value"] for frame in frames] == [0x00]
+    assert all(frame["parity_ok"] and frame["stop_ok"] for frame in frames)
+
+
+def test_uart_parity_error_does_not_invent_extra_bytes():
+    # 0x55 falls on every other bit. A real stop with bad parity must stay one
+    # frame; those data edges must not become extra valid bytes.
+    first = uart_bits(0x55, 10, parity="even")
+    second = uart_bits(0xA5, 10, parity="odd")
+    frames = decode_uart(wf(0, first + second), baud_rate=100_000, parity="odd")
+    assert [(frame["value"], frame["parity_ok"], frame["stop_ok"]) for frame in frames] == [
+        (0x55, False, True),
+        (0xA5, True, True),
+    ]
+    assert frames[-1]["resync_count"] == 0
+    limited = decode_uart(wf(0, first + second), baud_rate=100_000, parity="odd", limit=1)
+    assert [(frame["value"], frame["parity_ok"]) for frame in limited] == [(0x55, False)]
+
+
+def test_uart_noninteger_ratio_keeps_back_to_back_ascii():
+    # 1 MHz / 115200 is ~8.68 samples/bit. ASCII MSB is 0, so the only highs
+    # before the next start are the stop bit (often 8 samples, below ceil).
+    text = "HELLO WORLD"
+    sample_rate = 1_000_000
+    baud = 115200
+    spb = sample_rate / baud
+    lead_bits = 2.0
+    n = int((lead_bits + 10 * len(text) + 3) * spb) + 5
+    line = np.ones(n, dtype=np.uint8)
+    for i in range(n):
+        t_bit = (i + 0.5) / sample_rate * baud - lead_bits
+        if t_bit < 0:
+            continue
+        char_i = int(t_bit // 10)
+        if char_i >= len(text):
+            continue
+        bit_pos = int(t_bit - char_i * 10)
+        if bit_pos == 0:
+            line[i] = 0
+        elif 1 <= bit_pos <= 8:
+            line[i] = (ord(text[char_i]) >> (bit_pos - 1)) & 1
+    frames = decode_uart(wf(0, line.tolist(), rate=sample_rate), baud_rate=baud)
+    assert "".join(chr(frame["value"]) for frame in frames) == text
+    assert all(frame["parity_ok"] and frame["stop_ok"] for frame in frames)
+
+
+def _uart_frame(byte, spb=10):
+    bits = [0] * spb
+    for k in range(8):
+        bits += [((byte >> k) & 1)] * spb
+    bits += [1] * spb
+    return bits
+
+
+def test_uart_mid_frame_capture_does_not_invent_bytes():
+    # Cuts that begin on a single high data bit. The false lock's stop can
+    # be high; that edge is still not a byte. A two-bit break afterwards
+    # yields only the real byte that follows the fragment.
+    spb = 10
+    for value in (0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x55, 0x80, 0xA5, 0xAA, 0xFE, 0xFF):
+        stream = [1] * (spb * 2) + _uart_frame(value, spb) + _uart_frame(0x42, spb) + _uart_frame(0x43, spb)
+        for cut_bit in range(1, 10):
+            mid = stream[spb * 2 + cut_bit * spb:]
+            got = [frame["value"] for frame in decode_uart(wf(0, mid), baud_rate=100_000)]
+            assert got in ([], [0x42, 0x43], [0x43]), (hex(value), cut_bit, got)
+        fragment = stream[spb * 2 + 4 * spb:spb * 2 + 10 * spb]
+        recovered = fragment + [1] * (spb * 2) + _uart_frame(0x44, spb)
+        got = [frame["value"] for frame in decode_uart(wf(0, recovered), baud_rate=100_000)]
+        assert got == [0x44], hex(value)
+
+
+def test_uart_bad_frame_does_not_drop_following_back_to_back_bytes():
+    # Forced-low stop. The next ASCII bytes are back-to-back (one stop bit
+    # of idle once the stream is locked again) and must still decode.
+    spb = 10
+
+    def bad(byte):
+        bits = [0] * spb
+        for k in range(8):
+            bits += [((byte >> k) & 1)] * spb
+        bits += [0] * spb
+        return bits
+
+    bits = [1] * (spb * 2)
+    bits += _uart_frame(ord("H"), spb) + _uart_frame(ord("E"), spb)
+    bits += bad(ord("X"))
+    bits += _uart_frame(ord("L"), spb) + _uart_frame(ord("O"), spb)
+    frames = decode_uart(wf(0, bits), baud_rate=100_000)
+    assert "".join(chr(frame["value"]) for frame in frames) == "HELO"
+    assert frames[-1]["resync_count"] >= 1
+    assert frames[-1]["skipped"] >= 1
+    assert all(frame["stop_ok"] and frame["parity_ok"] for frame in frames)
 
 
 def test_uart_inverted_and_two_stop_bits():

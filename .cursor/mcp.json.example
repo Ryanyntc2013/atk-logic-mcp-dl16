@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "atk-dl16": {
+      "command": "python",
+      "args": ["-m", "dl16_mcp.server"],
+      "cwd": ".",
+      "env": {
+        "DL16_BACKEND_MODE": "session",
+        "DL16_CLI_PATH": "<absolute-path-to-atk-dl16-executable>",
+        "DL16_DATA_DIR": "<absolute-path-to-artifacts-directory>"
+      }
+    }
+  }
+}

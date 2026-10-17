@@ -1,7 +1,9 @@
 """Application layer shared by MCP tools and local CLI."""
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
 from typing import Any
 
@@ -40,7 +42,7 @@ def logic_status() -> dict[str, Any]:
 
 def logic_capture(channels: list[int] | None = None, sample_rate_hz: int = 20_000_000,
                   duration_ms: int = 20, threshold_voltage: float = 1.6,
-                  trigger: str = "immediate", timeout_s: float = 45.0,
+                  trigger: str = "immediate", timeout_s: float | None = None,
                   trigger_position_percent: float | None = None,
                   trigger_timeout_sec: int | None = None) -> dict[str, Any]:
     return backend.capture(CaptureRequest(tuple(channels if channels is not None else [0, 1]),
@@ -136,30 +138,80 @@ def _parse_condition(condition) -> tuple[int, str]:
 def logic_filter(capture_id: str, channel: int, min_pulse_samples: int,
                  atkdl_file: str | None = None, out_name: str | None = None,
                  overwrite: bool = False) -> dict[str, Any]:
-    """Write a derived capture with pulses shorter than min_pulse_samples removed."""
+    """Create a new, provenance-preserving capture; NEVER modify an existing capture.
+
+    `overwrite` is retained for API compatibility but intentionally cannot bypass
+    protection on capture directories (including previously derived captures).
+    """
     try:
         wave = _load(capture_id, channel, atkdl_file=atkdl_file)
-        filtered, removed = glitch_filter(wave.raw, wave.samples, min_pulse_samples=min_pulse_samples)
         new_id = out_name or f"{capture_id}-filt{min_pulse_samples}-ch{channel:02d}"
-        if not CAPTURE_ID_RE.fullmatch(new_id):
+        if not CAPTURE_ID_RE.fullmatch(new_id) or new_id in (".", ".."):
             raise ValueError("Unsafe derived capture id")
+        if not atkdl_file and new_id == capture_id:
+            raise ValueError("In-place filtering is forbidden; source capture is immutable")
         folder = captures_dir() / new_id
-        if folder.exists() and not overwrite:
-            raise ValueError("Derived capture exists; pass overwrite=true to replace it")
-        folder.mkdir(parents=True, exist_ok=True)
-        (folder / f"ch{channel:02d}.bits").write_bytes(filtered)
+        # Exclusive creation prevents destroying originals or mixing old/new channels.
+        # No existing directory is writable through this analysis operation.
+        if folder.exists() or folder.is_symlink():
+            raise ValueError("Capture ID exists; use a new derived capture ID (overwrite forbidden)")
+        filtered, removed = glitch_filter(wave.raw, wave.samples,
+                                          min_pulse_samples=min_pulse_samples)
+        original = wave.metadata
+        other_channels = []
+        # Buffer captures use one common sample clock; preserve other channels
+        # unchanged when deriving a filtered channel for multi-channel analysis.
+        if not atkdl_file:
+            source_counts = original.get("sample_counts", {})
+            if isinstance(source_counts, dict):
+                for key, count in source_counts.items():
+                    other_ch = int(key)
+                    if not 0 <= other_ch <= 15:
+                        raise ValueError("Invalid source channel metadata")
+                    if other_ch == channel:
+                        continue
+                    count = int(count)
+                    source_path = captures_dir() / capture_id / f"ch{other_ch:02d}.bits"
+                    if count != wave.samples or count <= 0 or source_path.stat().st_size * 8 < count:
+                        raise ValueError(f"Unaligned or missing source channel {other_ch}")
+                    other_channels.append((other_ch, count, source_path))
         meta = {
-            "capture_id": new_id, "derived_from": capture_id, "transform": "glitch_filter",
+            "capture_id": new_id,
+            "derived_from": str(wave.metadata.get("archive_path", atkdl_file)) if atkdl_file else capture_id,
+            "transform": "glitch_filter", "processing_status": "COMPLETE",
             "min_pulse_samples": min_pulse_samples, "channel": channel,
             "sample_rate": wave.sample_rate_hz, "requested_samples": wave.samples,
-            "sample_counts": {str(channel): wave.samples}, "data_integrity": "COMPLETE",
-            "capture_complete_received": True, "trigger_ack_received": True,
-            "evidence_source": "DERIVED",
+            "sample_counts": {str(channel): wave.samples,
+                              **{str(ch): count for ch, count, _ in other_channels}},
+            "preserved_channels": sorted([channel, *[ch for ch, _, _ in other_channels]]),
+            "data_integrity": wave.integrity if wave.integrity == "COMPLETE" else "UNVERIFIED",
+            # These describe the source acquisition, not the success of filtering.
+            "capture_complete_received": bool(original.get("capture_complete_received", False)),
+            "trigger_ack_received": bool(original.get("trigger_ack_received", False)),
+            "evidence_source": "DERIVED", "source_evidence_source": wave.source,
+            "source_integrity": wave.integrity,
+            "source_sha256": hashlib.sha256(wave.raw).hexdigest(),
         }
-        (folder / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+        folder.mkdir(parents=False, exist_ok=False)
+        try:
+            (folder / f"ch{channel:02d}.bits").write_bytes(filtered)
+            from shutil import copyfile
+            for ch, _, source_path in other_channels:
+                copyfile(source_path, folder / f"ch{ch:02d}.bits")
+            # Publish metadata last, via rename, so readers never see a partial meta.json.
+            partial_meta = folder / "meta.json.partial"
+            partial_meta.write_text(json.dumps(meta), encoding="utf-8")
+            os.replace(partial_meta, folder / "meta.json")
+        except BaseException:
+            # Only delete the newly-created folder; never remove an existing capture.
+            from shutil import rmtree
+            rmtree(folder, ignore_errors=True)
+            raise
         return {"success": True, "derived_capture_id": new_id, "channel": channel,
-                "removed_pulses": removed, "path": str(folder), "source_evidence": wave.source}
-    except (ValueError, FileNotFoundError, OSError, KeyError) as exc:
+                "removed_pulses": removed, "path": str(folder),
+                "source_evidence": wave.source, "source_integrity": wave.integrity,
+                "source_sha256": meta["source_sha256"], "integrity": meta["data_integrity"]}
+    except (ValueError, FileNotFoundError, OSError, KeyError, TypeError) as exc:
         return {"success": False, "error_code": "FILTER_FAILED", "message": str(exc)}
 
 
@@ -254,97 +306,189 @@ def logic_buffer_cancel(operation_id: str) -> dict[str, Any]:
     return backend.buffer_control(operation_id, cancel=True)
 
 
-def logic_self_test(confirm_safe_wiring: bool = False) -> dict[str, Any]:
-    """Run automated hardware end-to-end self-test on loopback channels (CH8=PWM0, CH14=PWM1)."""
-    from pathlib import Path
-    import time
-    if not confirm_safe_wiring:
-        return {
-            "success": False,
-            "error_code": "SAFETY_CONFIRMATION_REQUIRED",
-            "message": "Self-test requires confirm_safe_wiring=True confirming CH8 connected to PWM0 and CH14 connected to PWM1 with GUI closed.",
-        }
-    try:
-        logic_session_close()
-        st = logic_status()
-        if not st.get("connected"):
-            return {"success": False, "error_code": "DEVICE_NOT_CONNECTED", "message": "DL16 device is not connected", "status": st}
+SELF_TEST_CONFIRMATION = "CONFIRMED_SAFE_WIRING_GUI_CLOSED"
 
+
+def _close_result_is_clean(result: dict[str, Any]) -> bool:
+    """A successful close is clean whether or not a session object was present.
+
+    ``closed: False`` with ``success: True`` means nothing was open (oneshot, or
+    the backend already dropped the owner after its own cleanup). A failed close
+    is never clean.
+    """
+    return result.get("success") is True and result.get("closed") in (True, False)
+
+
+def logic_self_test(safety_confirmation: str = "") -> dict[str, Any]:
+    """Bounded loopback diagnostic. Never steal an existing session or certify calibration.
+
+    Drives real PWM0 and PWM1. Requires PWM0 wired to CH8, PWM1 wired to CH14,
+    safe voltage, and the ATK-Logic GUI closed. Refuses oneshot mode and any
+    busy session or in-flight buffer/stream operation.
+    """
+    import time
+
+    if safety_confirmation != SELF_TEST_CONFIRMATION:
+        return {"success": False, "error_code": "SAFETY_CONFIRMATION_REQUIRED",
+                "message": "Pass safety_confirmation="
+                           "CONFIRMED_SAFE_WIRING_GUI_CLOSED after checking "
+                           "PWM0->CH8, PWM1->CH14, safe voltage, and a closed GUI"}
+    if not backend.session_mode_enabled():
+        return {"success": False, "error_code": "SESSION_MODE_REQUIRED",
+                "message": "Self-test drives PWM and capture; set DL16_BACKEND_MODE=session"}
+    if not backend.claim_for_self_test():
+        return {"success": False, "error_code": "SESSION_ALREADY_OWNED",
+                "message": "Close the existing session and wait for buffer/stream "
+                           "operations before self-test; no output changed"}
+
+    active_output_possible = False
+    active_stream_id: str | None = None
+    cleanup: dict[str, Any] = {}
+
+    def run_diagnostic() -> dict[str, Any]:
+        nonlocal active_output_possible, active_stream_id
+        st = logic_status()
+        if not st.get("connected") or not st.get("ready", True):
+            return {"success": False, "error_code": "DEVICE_NOT_CONNECTED", "status": st}
+
+        # Treat a command sent to hardware as possibly effective even if its reply fails.
+        active_output_possible = True
         p0 = logic_pwm(0, "configure", 1000, 50.0, confirm_safe_wiring=True)
+        if not p0.get("success"):
+            return {"success": False, "error_code": "PWM_CONFIG_FAILED", "pwm0": p0}
         p1 = logic_pwm(1, "configure", 2000, 50.0, confirm_safe_wiring=True)
-        if not p0.get("success") or not p1.get("success"):
+        if not p1.get("success"):
             return {"success": False, "error_code": "PWM_CONFIG_FAILED", "pwm0": p0, "pwm1": p1}
 
-        buf = logic_capture(channels=[8, 14], sample_rate_hz=20_000_000, duration_ms=20, threshold_voltage=1.6)
+        buf = logic_capture(channels=[8, 14], sample_rate_hz=20_000_000,
+                            duration_ms=20, threshold_voltage=1.6)
         if not buf.get("success"):
             return {"success": False, "error_code": "BUFFER_CAPTURE_FAILED", "buffer_capture": buf}
-        buf_cid = buf.get("capture_id")
-        buf_p8 = logic_measure_pwm(buf_cid, 8)
-        buf_p14 = logic_measure_pwm(buf_cid, 14)
+        buf_id = buf.get("capture_id")
+        if not isinstance(buf_id, str) or not buf_id:
+            return {"success": False, "error_code": "BUFFER_ARTIFACT_MISSING", "buffer_capture": buf}
+        buf_p8 = logic_measure_pwm(buf_id, 8)
+        buf_p14 = logic_measure_pwm(buf_id, 14)
 
-        logic_session_close()
+        # Existing test procedure uses separate native owners for Buffer and Stream.
+        # Verify cleanup before starting a second owner; do not assume close worked.
+        closed = logic_session_close()
+        if not _close_result_is_clean(closed):
+            return {"success": False, "error_code": "INTERMEDIATE_CLOSE_FAILED", "close": closed}
+        active_output_possible = True
         p0 = logic_pwm(0, "configure", 1000, 50.0, confirm_safe_wiring=True)
+        if not p0.get("success"):
+            return {"success": False, "error_code": "STREAM_PWM_CONFIG_FAILED", "pwm0": p0}
         p1 = logic_pwm(1, "configure", 2000, 50.0, confirm_safe_wiring=True)
-        if not p0.get("success") or not p1.get("success"):
+        if not p1.get("success"):
             return {"success": False, "error_code": "STREAM_PWM_CONFIG_FAILED", "pwm0": p0, "pwm1": p1}
 
-        str_start = logic_stream_start(
+        started = logic_stream_start(
             experimental_opt_in=True,
             safety_confirmation="CONFIRMED_SAFE_WIRING_GUI_CLOSED",
-            channels=[8, 14],
-            sample_rate_hz=1_000_000,
-            duration_ms=100,
-            threshold_voltage=1.6,
-        )
-        op_id = str_start.get("operation_id")
-        if not op_id:
-            return {"success": False, "error_code": "STREAM_START_FAILED", "stream_start": str_start}
+            channels=[8, 14], sample_rate_hz=1_000_000,
+            duration_ms=100, threshold_voltage=1.6)
+        op_id = started.get("operation_id")
+        # A failed start can still return an operation id. Remember it before
+        # returning so the finally block cancels that owner.
+        if isinstance(op_id, str) and op_id:
+            active_stream_id = op_id
+        accepted = started.get("ok", started.get("success", bool(op_id)))
+        if not accepted or not isinstance(op_id, str) or not op_id:
+            return {"success": False, "error_code": "STREAM_START_FAILED", "stream_start": started}
 
-        t0 = time.monotonic()
-        while True:
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
             poll = logic_stream_poll(op_id)
             if poll.get("state") == "finished":
+                active_stream_id = None
                 break
+            if poll.get("success") is False or poll.get("ok") is False:
+                return {"success": False, "error_code": "STREAM_POLL_FAILED", "poll": poll}
             time.sleep(0.02)
-            if time.monotonic() - t0 > 10:
-                return {"success": False, "error_code": "STREAM_TIMEOUT", "poll": poll}
+        else:
+            return {"success": False, "error_code": "STREAM_TIMEOUT", "operation_id": op_id}
 
-        str_res = poll.get("response", {}).get("result", {})
-        str_dir = str_res.get("artifact_directory", "")
-        str_cid = Path(str_dir).name
-        str_p8 = logic_measure_pwm(str_cid, 8)
-        str_p14 = logic_measure_pwm(str_cid, 14)
-
-        logic_session_close()
+        result = poll.get("response", {}).get("result", {})
+        if not isinstance(result, dict):
+            return {"success": False, "error_code": "STREAM_RESULT_MISSING", "poll": poll}
+        reason = result.get("reason")
+        if reason not in ("DEADLINE", "COMPLETE") or result.get("cleanup_stop_ok") is not True:
+            return {"success": False, "error_code": "STREAM_TERMINATION_UNVERIFIED",
+                    "reason": reason, "cleanup_stop_ok": result.get("cleanup_stop_ok")}
+        stored_bytes = result.get("stored_bytes", 0)
+        if not isinstance(stored_bytes, int) or stored_bytes <= 0:
+            return {"success": False, "error_code": "STREAM_NO_DATA", "stored_bytes": stored_bytes}
+        stream_dir = result.get("artifact_directory", "")
+        stream_id = str(stream_dir).rstrip("/\\").replace("\\", "/").split("/")[-1]
+        if not stream_id or stream_id == ".":
+            return {"success": False, "error_code": "STREAM_ARTIFACT_MISSING"}
+        str_p8 = logic_measure_pwm(stream_id, 8)
+        str_p14 = logic_measure_pwm(stream_id, 14)
 
         buf_ok = (990 <= buf_p8.get("frequency_hz_median", 0) <= 1010 and
                   1980 <= buf_p14.get("frequency_hz_median", 0) <= 2020)
         str_ok = (990 <= str_p8.get("frequency_hz_median", 0) <= 1010 and
                   1980 <= str_p14.get("frequency_hz_median", 0) <= 2020)
-
-        all_ok = buf_ok and str_ok
         return {
-            "success": all_ok,
-            "overall_health": "HEALTHY" if all_ok else "DEGRADED",
+            "success": bool(buf_ok and str_ok),
+            "overall_health": "DIAGNOSTIC_PASS_UNCALIBRATED" if buf_ok and str_ok else "DEGRADED",
             "device": st.get("details", {}).get("model", "DL16"),
-            "buffer_capture": {
-                "ok": buf_ok,
-                "capture_id": buf_cid,
+            "buffer_capture": {"ok": buf_ok, "capture_id": buf_id,
                 "ch8_freq_hz": buf_p8.get("frequency_hz_median"),
-                "ch14_freq_hz": buf_p14.get("frequency_hz_median"),
-                "ch8_jitter_rms_ns": buf_p8.get("period_ns_jitter_rms"),
-                "ch14_jitter_rms_ns": buf_p14.get("period_ns_jitter_rms"),
-            },
-            "stream_capture": {
-                "ok": str_ok,
-                "capture_id": str_cid,
-                "stored_bytes": str_res.get("stored_bytes"),
-                "reads": str_res.get("reads"),
+                "ch14_freq_hz": buf_p14.get("frequency_hz_median")},
+            "stream_capture": {"ok": str_ok, "capture_id": stream_id,
+                "stored_bytes": stored_bytes, "reads": result.get("reads"),
+                "termination_reason": reason, "data_integrity": str_p8.get("integrity"),
                 "ch8_freq_hz": str_p8.get("frequency_hz_median"),
-                "ch14_freq_hz": str_p14.get("frequency_hz_median"),
-            },
+                "ch14_freq_hz": str_p14.get("frequency_hz_median")},
+            "calibrated_timing_verified": False,
         }
-    except Exception as exc:
-        logic_session_close()
-        return {"success": False, "error_code": "SELF_TEST_EXCEPTION", "message": str(exc)}
 
+    try:
+        report = run_diagnostic()
+    except Exception as exc:
+        report = {"success": False, "error_code": "SELF_TEST_EXCEPTION", "message": str(exc)}
+    finally:
+        if active_stream_id is not None:
+            try:
+                cleanup["stream_cancel"] = logic_stream_cancel(active_stream_id)
+                deadline = time.monotonic() + 3
+                terminal = False
+                while time.monotonic() < deadline:
+                    response = logic_stream_poll(active_stream_id)
+                    if response.get("state") == "finished":
+                        terminal = True
+                        break
+                    if response.get("success") is False or response.get("ok") is False:
+                        break
+                    time.sleep(0.02)
+                cleanup["stream_finished"] = terminal
+            except Exception as exc:
+                cleanup["stream_cancel_error"] = str(exc)
+        if active_output_possible:
+            for output in (0, 1):
+                try:
+                    cleanup[f"pwm{output}_stop"] = logic_pwm(output, "stop", confirm_safe_wiring=True)
+                except Exception as exc:
+                    cleanup[f"pwm{output}_stop"] = {"success": False, "message": str(exc)}
+        try:
+            cleanup["session_close"] = logic_session_close()
+        except Exception as exc:
+            cleanup["session_close"] = {"success": False, "message": str(exc)}
+        backend.release_self_test_claim()
+
+    cleanup_ok = (
+        (active_stream_id is None or cleanup.get("stream_finished") is True) and
+        all(cleanup.get(f"pwm{i}_stop", {}).get("success") is True
+            for i in (0, 1) if active_output_possible) and
+        _close_result_is_clean(cleanup.get("session_close", {}))
+    )
+    report["physical_pwm_off_verified"] = False  # requires independent hardware observation
+    report["cleanup"] = cleanup
+    report["cleanup_ok"] = cleanup_ok
+    if not cleanup_ok:
+        report["success"] = False
+        report["overall_health"] = "UNVERIFIED_CLEANUP"
+        report.setdefault("error_code", "SELF_TEST_CLEANUP_UNVERIFIED")
+    return report

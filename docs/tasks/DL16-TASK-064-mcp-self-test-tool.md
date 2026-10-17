@@ -1,5 +1,10 @@
 # DL16-TASK-064 — automated hardware self-test tool for MCP
 
+> Current contract (TASK-066): a numeric pass is `DIAGNOSTIC_PASS_UNCALIBRATED`, and the
+> tool requires `safety_confirmation="CONFIRMED_SAFE_WIRING_GUI_CLOSED"`. The `HEALTHY`
+> string and `confirm_safe_wiring=True` below are this task's historical report, not a
+> calibration certificate.
+
 State: **DONE (implemented, verified with synthetic tests and confirmed via physical HIL run)**.
 Base: `35ae4bb`. Single physical owner loopback verification.
 

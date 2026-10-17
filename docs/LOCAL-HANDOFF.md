@@ -1,3 +1,16 @@
+# Latest continuation — TASK-066 review, 2026-10-11
+
+Offline review fixes are on `fix/DL16-TASK-066-offline-correctness`.
+`logic_self_test` requires `safety_confirmation="CONFIRMED_SAFE_WIRING_GUI_CLOSED"`,
+`DL16_BACKEND_MODE=session`, and a device that is not already owned.
+A numeric loopback pass reports `overall_health: "DIAGNOSTIC_PASS_UNCALIBRATED"`.
+That verdict means the waveform met the numeric check. It is not calibrated timing
+and it is not `HIL_PASS`. Physical acceptance for this branch remains `HIL_NOT_RUN`.
+Follow-up on the same branch: `close()` drops a stuck operation id once the child
+is confirmed gone; an explicit `timeout_s` is checked against the 30 s default
+trigger wait; self-test claims the device before the first PWM; the self-test
+parameter rename is recorded in `CHANGELOG.md`.
+
 # Latest continuation — TASK-065, 2026-10-11
 
 DONE offline scope: complete requested tests and trigger-origin replay PASS;
@@ -14,12 +27,11 @@ Details: [tasks/DL16-TASK-065-metro-trigger-origin.md](tasks/DL16-TASK-065-metro
 
 # Latest continuation — TASK-064, 2026-10-11
 
-HIL DONE. Delivered automated hardware diagnostic tool `logic_self_test(confirm_safe_wiring=True)`.
-Guarded with mandatory safety confirmation; automates USB status check, dual PWM start,
-high-speed 20MHz Buffer capture (verifying 1000Hz on CH8 and 2000Hz on CH14 with 0.0ns jitter),
-1MHz Stream capture (verifying dual-frequency recovery and 16-channel storage), and clean session teardown.
-Live verification confirmed `overall_health: "HEALTHY"`.
-Validation: **309 full passed**, compileall clean.
+Historical note. Delivered `logic_self_test` for the PWM0->CH8 / PWM1->CH14 loopback.
+The physical run recorded `overall_health: "HEALTHY"`. That label is retired.
+The current success verdict is `DIAGNOSTIC_PASS_UNCALIBRATED` (see the TASK-066 note above).
+Do not treat this section as a calibration certificate or as `HIL_PASS` for later tasks.
+Validation at the time: **309 full passed**, compileall clean.
 Details: [tasks/DL16-TASK-064-mcp-self-test-tool.md](tasks/DL16-TASK-064-mcp-self-test-tool.md).
 
 # Latest continuation — TASK-063, 2026-10-11
