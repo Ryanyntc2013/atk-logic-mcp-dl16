@@ -69,17 +69,25 @@ def github_json(url: str, *, timeout: float = 12) -> dict[str, Any]:
         raise RemoteCheckError(f"Cannot verify GitHub API resource: {type(exc).__name__}: {exc}") from exc
 
 
+def _nonempty_text(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
 def load_manifest(path: Path = MANIFEST) -> dict[str, Any]:
     manifest = json.loads(path.read_text(encoding="utf-8"))
     if manifest.get("schema") != "dl16-reference-watch/v1":
         raise ValueError("Unexpected reference manifest schema")
     for item in manifest["repositories"]:
-        if not REPO_RE.fullmatch(item["repo"]) or not SHA_RE.fullmatch(item["pin"]):
+        if not isinstance(item, dict) or not _nonempty_text(item.get("key")):
             raise ValueError("Invalid pinned GitHub repository entry")
-        if item["branch"] not in ("main", "master"):
+        if not REPO_RE.fullmatch(str(item.get("repo", ""))) or not SHA_RE.fullmatch(str(item.get("pin", ""))):
+            raise ValueError("Invalid pinned GitHub repository entry")
+        if item.get("branch") not in ("main", "master"):
             raise ValueError("Unsupported branch in pinned reference")
     for pr in manifest.get("pull_requests", []):
-        if not REPO_RE.fullmatch(pr["repo"]) or type(pr["number"]) is not int or pr["number"] < 1:
+        if (not isinstance(pr, dict) or not REPO_RE.fullmatch(str(pr.get("repo", "")))
+                or type(pr.get("number")) is not int or pr["number"] < 1
+                or not _nonempty_text(pr.get("topic"))):
             raise ValueError("Invalid watched PR")
     return manifest
 
@@ -144,14 +152,36 @@ def audit(manifest: dict, getter: Callable[[str], dict] | None = None) -> dict:
             "repin_performed": False, "physical_hil_performed": False}
 
 
+def _md_cell(value: object) -> str:
+    return str(value).replace("\r", " ").replace("\n", " ").replace("|", "/")
+
+
+def _markdown_detail(ref: dict) -> str:
+    error = ref.get("error")
+    if error:
+        return _md_cell(error)
+    reason = ref.get("reason")
+    if reason:
+        branch = ref.get("actual_default_branch")
+        text = str(reason) if not branch else f"{reason} ({branch})"
+        return _md_cell(text)
+    compare = ref.get("compare_status")
+    return _md_cell(compare) if compare else ""
+
+
 def as_markdown(doc: dict) -> str:
     lines = ["# DL16 reference SHA drift audit", "",
              f"Observed UTC: {doc['observed_utc']}", "",
-             "| Project | Status | Current SHA | Fixed SHA |",
-             "|---|---|---|---|"]
+             "| Project | Status | Current SHA | Fixed SHA | Reason |",
+             "|---|---|---|---|---|"]
     for ref in doc["repositories"]:
-        lines.append("| " + " | ".join((ref["project"], ref["status"],
-                     ref.get("head", "UNKNOWN"), ref["pin"])) + " |")
+        lines.append("| " + " | ".join((
+            _md_cell(ref["project"]), _md_cell(ref["status"]),
+            _md_cell(ref.get("head", "UNKNOWN")), _md_cell(ref["pin"]),
+            _markdown_detail(ref))) + " |")
+    lines.append("")
+    lines.append("Summary: unchanged={unchanged} drift={drift} unknown={unknown}".format(
+        unchanged=doc["unchanged"], drift=doc["drift"], unknown=doc["unknown"]))
     lines += ["", "## Watched vendor PRs", ""]
     for pr in doc["pull_requests"]:
         lines.append(f"- {pr['repository']}#{pr['number']}: {pr['status']} - {pr['topic']}")

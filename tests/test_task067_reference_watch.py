@@ -207,3 +207,54 @@ def test_main_exit_codes(monkeypatch, tmp_path):
     manifest = tmp_path / "bad.json"
     manifest.write_text(json.dumps(src), encoding="utf-8")
     assert refcheck.main(["--manifest", str(manifest)]) == 4
+
+
+def test_markdown_reports_branch_reason_unknown_error_and_summary():
+    def mixed(url):
+        if url == "https://api.github.com/repos/alientek-openedv/atk-logic":
+            return {"default_branch": "main"}
+        if "/compare/" in url and "gjjisadog" in url:
+            raise refcheck.RemoteCheckError("GitHub API limited")
+        return fake_response(url)
+
+    report = refcheck.audit(refcheck.load_manifest(), mixed)
+    text = refcheck.as_markdown(report)
+    assert "| Project | Status | Current SHA | Fixed SHA | Reason |" in text
+    assert "Summary: unchanged=3 drift=1 unknown=1" in text
+    vendor = next(line for line in text.splitlines() if line.startswith("| VENDOR |"))
+    cpp = next(line for line in text.splitlines() if line.startswith("| CPP |"))
+    assert "DRIFT" in vendor and "UNKNOWN" in vendor and "Default branch changed (main)" in vendor
+    assert "UNKNOWN" in cpp and "GitHub API limited" in cpp
+
+
+@pytest.mark.parametrize("field,value", [
+    ("key", None),
+    ("key", ""),
+    ("key", "   "),
+    ("key", 7),
+])
+def test_manifest_rejects_invalid_repo_key(tmp_path, field, value):
+    src = refcheck.load_manifest()
+    if value is None:
+        del src["repositories"][0][field]
+    else:
+        src["repositories"][0][field] = value
+    manifest = tmp_path / "pins.json"
+    manifest.write_text(json.dumps(src), encoding="utf-8")
+    with pytest.raises(ValueError, match="Invalid pinned GitHub repository entry"):
+        refcheck.load_manifest(manifest)
+    assert refcheck.main(["--manifest", str(manifest)]) == 4
+
+
+@pytest.mark.parametrize("value", [None, "", "   ", 7])
+def test_manifest_rejects_invalid_pr_topic(tmp_path, value):
+    src = refcheck.load_manifest()
+    if value is None:
+        del src["pull_requests"][0]["topic"]
+    else:
+        src["pull_requests"][0]["topic"] = value
+    manifest = tmp_path / "pins.json"
+    manifest.write_text(json.dumps(src), encoding="utf-8")
+    with pytest.raises(ValueError, match="Invalid watched PR"):
+        refcheck.load_manifest(manifest)
+    assert refcheck.main(["--manifest", str(manifest)]) == 4
