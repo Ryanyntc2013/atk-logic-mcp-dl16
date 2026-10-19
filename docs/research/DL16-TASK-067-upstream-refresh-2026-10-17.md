@@ -82,3 +82,18 @@ VENDOR_SRD 仍未出现新默认分支提交。Linux PR #5 提及其隐符号链
 只读检查脚本 `scripts/check_dl16_references.py` 的退出码：`0` 五个 pin 均为 UNCHANGED 且监视中的 PR 仍为 OPEN；`2` 出现 drift（pin/默认分支变化，或监视中的 PR 不再是 OPEN；已合并时状态记为 MERGED，仅关闭未合并记为 CLOSED）；`3` 网络或 API 失败导致 UNKNOWN（优先于 drift，UNKNOWN 不是无更新）；`4` manifest 缺失或无效，此时没有网络结论。
 
 证据分层：GitHub commit/PR/release 是 REMOTE_SOURCE；其他作者的设备报告是 REPORTED_HIL；此次未连接真实 DL16，因此所有硬件问题仍为 HIL_NOT_RUN。
+
+## 验收记录
+
+状态：DONE（离线）。未连接 DL16，硬件结论为 **HIL_NOT_RUN**。
+
+任务 DL16-TASK-067。允许范围是参考文档、只读 pin 检查脚本和其离线测试。不修改 `src/dl16_mcp` 运行时或 USB 代码，不升级 pin，不发送设备命令。证据位置是本文件。
+
+下列命令在干净工作树、提交 `2b33d04836e97fa13178038741171ae8e5957447` 上执行。该提交包含 Reason 列、drift/unknown 汇总，以及 manifest 对 `key`/`topic` 的校验。
+
+- `python -m pytest -q tests/test_task067_reference_watch.py`
+  - 结果：`28 passed in 0.04s`
+- `python -m pytest -q`
+  - 结果：`246 passed, 91 skipped in 2.80s`
+- `python -m compileall -q src`
+  - 结果：退出码 0，无输出
